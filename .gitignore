@@ -205,3 +205,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 과제 작업용 내부 문서 (Public 레포에 노출 X)
+docs/datapilot-planning.md
