@@ -9,7 +9,7 @@ Pizza Ready 30일치 Mock 데이터를 삽입한다.
 """
 
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import duckdb
 from pathlib import Path
@@ -17,7 +17,7 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent.parent / "data" / "datapilot_mock.db"
 BASE_DATE = date(2026, 3, 31)   # 데이터 기간 마지막 날
 PERIOD_DAYS = 30                # 30일치
-NUM_USERS = 2000                # Mock 유저 수 (DAU 규모를 축소한 데모용)
+NUM_USERS = 3000                # Mock 유저 수 (D7 코호트 일 ~25명, 실행 시간 절충)
 START_DATE = BASE_DATE - timedelta(days=PERIOD_DAYS - 1)  # 2026-03-02
 
 # 시나리오 핵심 시점
@@ -32,7 +32,7 @@ PRODUCT_PRICES = {
     "p_006": 5000, "p_007": 9900, "p_008": 7900,   # premium
 }
 RANDOM_SEED = 42
-PREMIUM_PRODUCTS = ["p_006", "p_007", "p_008"]
+PREMIUM_PRODUCTS = {"p_006", "p_007", "p_008"}  # set: O(1) lookup
 NON_PREMIUM_PRODUCTS = ["p_001", "p_002", "p_003", "p_004", "p_005"]
 ALL_PRODUCTS = list(PRODUCT_PRICES.keys())
 
@@ -194,7 +194,7 @@ def create_tables(conn: duckdb.DuckDBPyConnection):
 
 
 def seed_users(conn: duckdb.DuckDBPyConnection):
-    """유저 마스터 데이터 생성 (2000명)"""
+    """유저 마스터 데이터 생성 (3000명)"""
 
     # 분포 가중치 리스트 — random.choice가 이 리스트에서 하나를 뽑으면 자연스럽게 비율이 맞음
     # Random.nextInt로 뽑는 것과 동일
@@ -330,13 +330,22 @@ def seed_payments(conn: duckdb.DuckDBPyConnection):
             hour = random.randint(8, 23)
             minute = random.randint(0, 59)
 
+            # 결제 상태: 97% success, 2% failed, 1% refunded
+            r = random.random()
+            if r < 0.02:
+                status = "failed"
+            elif r < 0.03:
+                status = "refunded"
+            else:
+                status = "success"
+
             payments.append((
                 f"pay_{pay_id:06d}",
                 user_id,
                 product,
                 PRODUCT_PRICES[product],
                 f"{current_date} {hour:02d}:{minute:02d}:00",
-                "success",
+                status,
             ))
             pay_id += 1
 
@@ -346,21 +355,23 @@ def seed_payments(conn: duckdb.DuckDBPyConnection):
 
 def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
     """상점 노출 로그 30일치. 유저별 스크롤 깊이(3~8)만큼만 노출 기록.
-    D-3 이후 Android는 premium이 하단(10~15)으로 밀려서 자연스럽게 노출 급감."""
+    D-3 이후 Android는 premium이 하단(4~6)으로 밀려서 자연스럽게 노출 급감."""
 
     users = conn.execute("SELECT user_id, platform FROM users").fetchall()
 
     impressions = []
     iid = 0
+    # 매일 25%만 상점 방문 → 방문자만 미리 추출해서 75% 루프 절약
+    n_visitors = int(len(users) * 0.25)
 
     for day_offset in range(PERIOD_DAYS):
         current_date = START_DATE + timedelta(days=day_offset)
         is_after_change = current_date >= UI_CHANGE_DATE
+        date_str = str(current_date)
 
-        for user_id, platform in users:
-            if random.random() > 0.25:  # 매일 유저의 25%가 상점 방문
-                continue
+        visitors = random.sample(users, n_visitors)
 
+        for user_id, platform in visitors:
             # 각 상품의 slot_order 결정
             product_slots = []
             for product_id in ALL_PRODUCTS:
@@ -377,7 +388,7 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
 
             # slot_order 순 정렬 → 스크롤 깊이만큼만 노출
             product_slots.sort(key=lambda x: x[1])
-            scroll_depth = random.randint(3, 8)  # 3개는 무조건, 최대 8개
+            scroll_depth = random.randint(3, 8)
             visible = product_slots[:scroll_depth]
 
             hour = random.randint(9, 22)
@@ -388,7 +399,7 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
                     f"imp_{iid:07d}",
                     user_id,
                     product_id,
-                    f"{current_date} {hour:02d}:{minute:02d}:00",
+                    f"{date_str} {hour:02d}:{minute:02d}:00",
                     slot_order,
                 ))
                 iid += 1
@@ -400,22 +411,29 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
 # ── 시나리오 2 트랜잭션: D7 리텐션 -12% (이벤트 종료) ──
 
 def seed_sessions(conn: duckdb.DuckDBPyConnection):
-    """세션 로그 30일치. D-14 이후 기존 유저 접속률 30% 감소."""
+    """세션 로그 30일치. D-14 이후 D7 코호트(설치 7일차 유저)만 복귀 확률 감소.
+    DAU 전체에는 영향 거의 없고 D7 리텐션만 떨어지도록 설계."""
 
-    users = conn.execute("SELECT user_id, platform, user_type FROM users").fetchall()
+    users = conn.execute(
+        "SELECT user_id, platform, user_type, install_date FROM users"
+    ).fetchall()
 
     sessions = []
     sid = 0
 
     for day_offset in range(PERIOD_DAYS):
         current_date = START_DATE + timedelta(days=day_offset)
-        is_after_event_end = current_date >= EVENT_END_DATE
+        is_after_event = current_date >= EVENT_END_DATE
+        # D7 코호트 판별용: 오늘이 설치 7일차인 유저의 install_date
+        d7_target_date = current_date - timedelta(days=7)
 
-        for user_id, platform, user_type in users:
-            # 접속 확률: 정상 30%, D-14 이후 기존 유저만 21%로 감소 (30% 하락)
-            login_rate = 0.30
-            if is_after_event_end and user_type == "existing":
-                login_rate = 0.21
+        for user_id, platform, user_type, install_date in users:
+            # D7 리텐션 시나리오: 이벤트 종료 후, 설치 7일차 유저만 복귀 확률 감소
+            # DAU 전체에는 영향 거의 없고 D7 리텐션만 ~5pp 하락
+            if install_date == d7_target_date and is_after_event:
+                login_rate = 0.25  # 30% → 25% (-5pp)
+            else:
+                login_rate = 0.30
 
             if random.random() > login_rate:
                 continue
@@ -424,11 +442,15 @@ def seed_sessions(conn: duckdb.DuckDBPyConnection):
             minute = random.randint(0, 59)
             duration_min = random.randint(3, 30)  # 3~30분
 
+            # 세션 종료 시간: datetime으로 정확하게 계산
+            start_dt = datetime(current_date.year, current_date.month, current_date.day, hour, minute)
+            end_dt = start_dt + timedelta(minutes=duration_min)
+
             sessions.append((
                 f"s_{sid:06d}",
                 user_id,
-                f"{current_date} {hour:02d}:{minute:02d}:00",
-                f"{current_date} {hour:02d}:{min(minute + duration_min, 59):02d}:00",
+                start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                end_dt.strftime("%Y-%m-%d %H:%M:%S"),
                 platform,
             ))
             sid += 1
@@ -452,6 +474,13 @@ def seed_events(conn: duckdb.DuckDBPyConnection):
     for session_id, user_id, session_start in sessions_data:
         session_date_str = str(session_start)[:10]
 
+        # login (세션마다 1회)
+        events.append((
+            f"e_{eid:07d}", user_id, "login",
+            str(session_start), None,
+        ))
+        eid += 1
+
         # stage_clear (세션당 50% 확률로 1회)
         if random.random() < 0.5:
             events.append((
@@ -460,8 +489,16 @@ def seed_events(conn: duckdb.DuckDBPyConnection):
             ))
             eid += 1
 
+        # purchase (세션당 10% 확률 — 결제 이벤트 로그)
+        if random.random() < 0.1:
+            events.append((
+                f"e_{eid:07d}", user_id, "purchase",
+                str(session_start), '{"source": "shop"}',
+            ))
+            eid += 1
+
         # event_participate (이벤트 기간 중에만, 세션당 40% 확률)
-        if session_date_str <= str(EVENT_END_DATE) and random.random() < 0.4:
+        if session_date_str < str(EVENT_END_DATE) and random.random() < 0.4:
             events.append((
                 f"e_{eid:07d}", user_id, "event_participate",
                 str(session_start), '{"event": "pizza_festival_s3"}',
@@ -493,27 +530,29 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
     """결제 시도 로그 30일치. D-0에 pagseguro(브라질) 실패율 급등.
     - 브라질 유저: 70% pagseguro, 나머지 google_play/apple_pay/stripe
     - 비브라질 유저: android=google_play, ios=apple_pay
-    - 정상 실패율 2%, D-0 pagseguro만 50% 실패"""
+    - 정상 실패율 2%, D-0 pagseguro + 18시 이후만 60% 실패"""
 
     users = conn.execute(
         "SELECT user_id, platform, country FROM users"
     ).fetchall()
 
-    pg_error_codes = ["E001", "E002", "E003"]  # pagseguro 에러
-    general_error_codes = ["E004", "E005"]       # 일반 에러
+    pg_error_codes = ["E001", "E002", "E003"]    # pagseguro 에러
+    general_error_codes = ["E004", "E005"]        # 일반 에러
 
     attempts = []
     aid = 0
+    # 매일 유저 7%만 결제 시도 → 해당 유저만 미리 추출해서 93% 루프 절약
+    n_payers = int(len(users) * 0.07)
 
     for day_offset in range(PERIOD_DAYS):
         current_date = START_DATE + timedelta(days=day_offset)
         is_outage_day = current_date == PG_OUTAGE_DATE
+        date_str = str(current_date)
 
-        for user_id, platform, country in users:
-            if random.random() > 0.07:  # 매일 유저 7%가 결제 시도
-                continue
+        payers = random.sample(users, n_payers)
 
-            # gateway 배정
+        for user_id, platform, country in payers:
+            # gateway 배정: 브라질 70% pagseguro, 비브라질은 플랫폼 기반
             if country == "brazil":
                 r = random.random()
                 if r < 0.70:
@@ -528,9 +567,12 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
                 else:
                     gateway = "stripe"
 
-            # 실패 여부: 정상 2%, D-0 pagseguro만 50%
+            hour = random.randint(8, 23)
+            minute = random.randint(0, 59)
+
+            # 실패 여부: 정상 2%, D-0 pagseguro 하루 전체 60%
             if is_outage_day and gateway == "pagseguro":
-                failed = random.random() < 0.80
+                failed = random.random() < 0.60
             else:
                 failed = random.random() < 0.02
 
@@ -540,14 +582,11 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
                 error_code = (random.choice(pg_error_codes) if gateway == "pagseguro"
                               else random.choice(general_error_codes))
 
-            hour = random.randint(8, 23)
-            minute = random.randint(0, 59)
-
             attempts.append((
                 f"att_{aid:06d}",
                 user_id,
                 gateway,
-                f"{current_date} {hour:02d}:{minute:02d}:00",
+                f"{date_str} {hour:02d}:{minute:02d}:00",
                 status,
                 error_code,
             ))
@@ -561,95 +600,117 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
 
 def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
     """raw 테이블에서 일별 KPI를 집계해 daily_kpi에 삽입.
-    직접 SQL로 계산하므로 raw ↔ daily_kpi 수치가 반드시 일치한다."""
+    단일 SQL로 30일치를 한번에 계산하므로 빠르고, raw ↔ daily_kpi 수치가 반드시 일치한다."""
 
-    kpi_rows = []
+    conn.execute(f"""
+        INSERT INTO daily_kpi
+        WITH dates AS (
+            -- 30일치 날짜 시퀀스 생성
+            SELECT CAST('{START_DATE}' AS DATE) + INTERVAL (i) DAY AS date
+            FROM generate_series(0, {PERIOD_DAYS - 1}) AS t(i)
+        ),
+        dau AS (
+            -- DAU: 해당 날짜에 세션이 있는 유니크 유저
+            SELECT CAST(session_start AS DATE) AS date,
+                   COUNT(DISTINCT user_id) AS dau
+            FROM sessions GROUP BY 1
+        ),
+        mau AS (
+            -- MAU: 전체 기간 유니크 유저 (프로토타입 단순화 — 30일 윈도우 JOIN 병목 회피)
+            SELECT d.date, (SELECT COUNT(DISTINCT user_id) FROM sessions) AS mau
+            FROM dates d
+        ),
+        rev AS (
+            -- Revenue + 결제 유저 수 (ARPPU 계산용)
+            SELECT CAST(timestamp AS DATE) AS date,
+                   COALESCE(SUM(amount), 0) AS revenue,
+                   COUNT(DISTINCT user_id) AS paying_users
+            FROM payments WHERE status = 'success'
+            GROUP BY 1
+        ),
+        d1 AS (
+            -- D1 Retention: 어제 설치 유저 중 오늘 접속 비율
+            SELECT d.date,
+                   COUNT(DISTINCT u.user_id) FILTER (
+                       WHERE s.user_id IS NOT NULL
+                   ) AS returned,
+                   COUNT(DISTINCT u.user_id) AS total
+            FROM dates d
+            JOIN users u ON u.install_date = CAST(d.date AS DATE) - 1
+            LEFT JOIN sessions s
+              ON u.user_id = s.user_id
+             AND CAST(s.session_start AS DATE) = d.date
+            GROUP BY d.date
+        ),
+        d7 AS (
+            -- D7 Retention: 7일 전 설치 유저 중 오늘 접속 비율
+            SELECT d.date,
+                   COUNT(DISTINCT u.user_id) FILTER (
+                       WHERE s.user_id IS NOT NULL
+                   ) AS returned,
+                   COUNT(DISTINCT u.user_id) AS total
+            FROM dates d
+            JOIN users u ON u.install_date = CAST(d.date AS DATE) - 7
+            LEFT JOIN sessions s
+              ON u.user_id = s.user_id
+             AND CAST(s.session_start AS DATE) = d.date
+            GROUP BY d.date
+        ),
+        sess AS (
+            -- 총 세션 수 + 평균 세션 길이 (초)
+            SELECT CAST(session_start AS DATE) AS date,
+                   COUNT(*) AS total_sessions,
+                   AVG(EXTRACT(EPOCH FROM (
+                       session_end::TIMESTAMP - session_start::TIMESTAMP
+                   ))) AS avg_sec
+            FROM sessions GROUP BY 1
+        ),
+        att AS (
+            -- 결제 시도 성공률 (payment_attempts 기반)
+            SELECT CAST(attempt_time AS DATE) AS date,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status = 'success') AS success
+            FROM payment_attempts GROUP BY 1
+        ),
+        installs AS (
+            -- 신규 설치 수
+            SELECT install_date AS date, COUNT(*) AS cnt
+            FROM users GROUP BY 1
+        )
+        SELECT
+            d.date,
+            COALESCE(dau.dau, 0),                                          -- dau
+            COALESCE(mau.mau, 0),                                          -- mau
+            COALESCE(rev.revenue, 0),                                      -- revenue
+            CASE WHEN COALESCE(rev.paying_users, 0) > 0                    -- arppu
+                 THEN ROUND(rev.revenue / rev.paying_users, 2)
+                 ELSE 0 END,
+            CASE WHEN COALESCE(d1.total, 0) > 0                            -- d1_retention
+                 THEN ROUND(d1.returned * 1.0 / d1.total, 4)
+                 ELSE 0 END,
+            CASE WHEN COALESCE(d7.total, 0) > 0                            -- d7_retention
+                 THEN ROUND(d7.returned * 1.0 / d7.total, 4)
+                 ELSE 0 END,
+            COALESCE(sess.total_sessions, 0),                              -- sessions
+            COALESCE(CAST(sess.avg_sec AS INTEGER), 0),                    -- avg_session_sec
+            CASE WHEN COALESCE(att.total, 0) > 0                           -- payment_success_rate
+                 THEN ROUND(att.success * 1.0 / att.total, 4)
+                 ELSE 1.0 END,
+            COALESCE(installs.cnt, 0)                                      -- new_installs
+        FROM dates d
+        LEFT JOIN dau ON dau.date = d.date
+        LEFT JOIN mau ON mau.date = d.date
+        LEFT JOIN rev ON rev.date = d.date
+        LEFT JOIN d1 ON d1.date = d.date
+        LEFT JOIN d7 ON d7.date = d.date
+        LEFT JOIN sess ON sess.date = d.date
+        LEFT JOIN att ON att.date = d.date
+        LEFT JOIN installs ON installs.date = d.date
+        ORDER BY d.date
+    """)
 
-    for day_offset in range(PERIOD_DAYS):
-        d = START_DATE + timedelta(days=day_offset)
-        ds = str(d)  # '2026-03-02' 형태
-
-        # DAU: 해당 날짜에 세션이 있는 유니크 유저
-        dau = conn.execute(f"""
-            SELECT COUNT(DISTINCT user_id) FROM sessions
-            WHERE CAST(session_start AS DATE) = '{ds}'
-        """).fetchone()[0]
-
-        # MAU: 최근 30일 윈도우 활성 유저
-        mau_start = str(d - timedelta(days=29))
-        mau = conn.execute(f"""
-            SELECT COUNT(DISTINCT user_id) FROM sessions
-            WHERE CAST(session_start AS DATE) BETWEEN '{mau_start}' AND '{ds}'
-        """).fetchone()[0]
-
-        # Revenue: 해당 날짜 성공 결제 합계
-        revenue = conn.execute(f"""
-            SELECT COALESCE(SUM(amount), 0) FROM payments
-            WHERE CAST(timestamp AS DATE) = '{ds}' AND status = 'success'
-        """).fetchone()[0]
-
-        # ARPPU: revenue / 결제 유저 수
-        paying = conn.execute(f"""
-            SELECT COUNT(DISTINCT user_id) FROM payments
-            WHERE CAST(timestamp AS DATE) = '{ds}' AND status = 'success'
-        """).fetchone()[0]
-        arppu = float(revenue) / paying if paying > 0 else 0
-
-        # D1 Retention: 어제 설치 유저 중 오늘 접속 비율
-        yesterday = str(d - timedelta(days=1))
-        d1_total = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{yesterday}'").fetchone()[0]
-        d1_returned = conn.execute(f"""
-            SELECT COUNT(DISTINCT u.user_id) FROM users u
-            JOIN sessions s ON u.user_id = s.user_id
-            WHERE u.install_date = '{yesterday}' AND CAST(s.session_start AS DATE) = '{ds}'
-        """).fetchone()[0]
-        d1_ret = d1_returned / d1_total if d1_total > 0 else 0
-
-        # D7 Retention: 7일 전 설치 유저 중 오늘 접속 비율
-        d7_ago = str(d - timedelta(days=7))
-        d7_total = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{d7_ago}'").fetchone()[0]
-        d7_returned = conn.execute(f"""
-            SELECT COUNT(DISTINCT u.user_id) FROM users u
-            JOIN sessions s ON u.user_id = s.user_id
-            WHERE u.install_date = '{d7_ago}' AND CAST(s.session_start AS DATE) = '{ds}'
-        """).fetchone()[0]
-        d7_ret = d7_returned / d7_total if d7_total > 0 else 0
-
-        # Sessions: 총 세션 수
-        total_sessions = conn.execute(f"""
-            SELECT COUNT(*) FROM sessions WHERE CAST(session_start AS DATE) = '{ds}'
-        """).fetchone()[0]
-
-        # Avg Session Sec: 평균 세션 길이
-        avg_sec = conn.execute(f"""
-            SELECT COALESCE(AVG(
-                EXTRACT(EPOCH FROM (session_end::TIMESTAMP - session_start::TIMESTAMP))
-            ), 0) FROM sessions
-            WHERE CAST(session_start AS DATE) = '{ds}'
-        """).fetchone()[0]
-
-        # Payment Success Rate: 결제 시도 성공률
-        att_total = conn.execute(f"""
-            SELECT COUNT(*) FROM payment_attempts WHERE CAST(attempt_time AS DATE) = '{ds}'
-        """).fetchone()[0]
-        att_success = conn.execute(f"""
-            SELECT COUNT(*) FROM payment_attempts
-            WHERE CAST(attempt_time AS DATE) = '{ds}' AND status = 'success'
-        """).fetchone()[0]
-        success_rate = att_success / att_total if att_total > 0 else 1.0
-
-        # New Installs: 해당 날짜 설치 유저 수
-        new_installs = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{ds}'").fetchone()[0]
-
-        kpi_rows.append((
-            d, dau, mau, float(revenue), round(arppu, 2),
-            round(d1_ret, 4), round(d7_ret, 4),
-            total_sessions, int(avg_sec),
-            round(success_rate, 4), new_installs,
-        ))
-
-    conn.executemany("INSERT INTO daily_kpi VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", kpi_rows)
-    print(f"daily_kpi: {len(kpi_rows)}건 삽입")
+    count = conn.execute("SELECT COUNT(*) FROM daily_kpi").fetchone()[0]
+    print(f"daily_kpi: {count}건 삽입")
 
 
 def main():

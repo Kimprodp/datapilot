@@ -11,7 +11,7 @@
 |---|---|
 | game_id | `pizza_ready` |
 | 데이터 기간 | 30일 (2026-03-02 ~ 2026-03-31) |
-| DAU 규모 | 약 500~600 (데모 축소, 유저 2000명 기준) |
+| DAU 규모 | 약 900 (데모 축소, 유저 3000명 기준) |
 | 이상 지표 | 3개 동시 발생 (서로 다른 원인) |
 
 ---
@@ -20,9 +20,9 @@
 
 | # | 이상 지표 | 세그먼트 | 숨겨진 원인 | 흔적 시점 | 관련 테이블 |
 |---|---|---|---|---|---|
-| 1 | 인앱결제 매출 감소 (~15%) | Android | 앱 업데이트로 상점 UI 진열 순서 변경 | 3일 전 (D-3) | users, payments, products, shop_impressions, releases |
-| 2 | D7 리텐션 -12% | 기존 유저 | 시즌 이벤트 종료 후 컨텐츠 공백 | 2주 전 (D-14) | users, events, sessions, content_releases |
-| 3 | 결제 성공률 감소 (~8%p) | 브라질 | 지역 PG사(PagSeguro) 장애 | D-0 당일 | users, payment_attempts, payment_errors, gateways |
+| 1 | 일 평균 인앱결제 매출이 D-3부터 약 11% 하락 | Android | 앱 업데이트로 상점 UI 진열 순서 변경 | 3일 전 (D-3) | users, payments, products, shop_impressions, releases |
+| 2 | D7 리텐션이 D-14부터 약 4%p 하락 | 기존 유저 | 시즌 이벤트 종료 후 컨텐츠 공백 | 2주 전 (D-14) | users, events, sessions, content_releases |
+| 3 | 결제 성공률이 D-0 당일 약 5%p 하락 | 브라질 | 지역 PG사(PagSeguro) 장애. 브라질에서 결제 실패율 약 56% | D-0 당일 | users, payment_attempts, payment_errors, gateways |
 
 ---
 
@@ -50,10 +50,10 @@
 | new_installs | INTEGER | 신규 설치 수 |
 
 **이상 반영 규칙**:
-- 매출: D-3부터 ~15% 감소 추세 (Android premium 노출 감소 → 구매 감소)
-- D7 리텐션: D-14부터 -12% 추세 (기존 유저 기여분). DAU도 동반 하락 (~20%) — 리텐션과 DAU는 실제로 연동되므로 자연스러운 현상
-- 결제 성공률: D-0 당일 ~8%p 하락 (브라질/PagSeguro 장애, 실패율 80%)
-- MAU, 신규 설치 등은 정상 범위 유지
+- 매출: D-3부터 약 11% 감소 (Android premium 노출 감소 → 구매 감소)
+- D7 리텐션: D-14부터 약 4% 감소 (D7 코호트만 복귀율 하락). DAU는 정상 유지 (-0.6%)
+- 결제 성공률: D-0 당일 약 5% 하락 (브라질/PagSeguro 장애, 실패율 약 56%)
+- MAU, DAU, 신규 설치 등은 정상 범위 유지
 
 ### 공통
 
@@ -69,7 +69,7 @@
 
 ---
 
-### 시나리오 1 — 매출 -8% (Android UI 변경)
+### 시나리오 1 — 매출 약 -11% (Android UI 변경)
 
 #### payments (결제 이벤트)
 | 컬럼 | 타입 | 설명 |
@@ -109,7 +109,7 @@
 
 ---
 
-### 시나리오 2 — D7 리텐션 -12% (이벤트 종료)
+### 시나리오 2 — D7 리텐션 약 -4%p (이벤트 종료)
 
 #### events (인게임 이벤트 로그)
 | 컬럼 | 타입 | 설명 |
@@ -140,7 +140,7 @@
 
 ---
 
-### 시나리오 3 — 결제 성공률 -25% (PG 장애)
+### 시나리오 3 — 결제 성공률 약 -5%p (PG 장애)
 
 #### payment_attempts (결제 시도 로그)
 | 컬럼 | 타입 | 설명 |
@@ -174,22 +174,39 @@
 
 ### 시나리오 1 (D-3: Android UI 변경)
 - `releases`에 D-3 시점 Android 배포 기록 추가. build_notes에 "Shop UI refresh (featured slot reordering)"
-- D-3 이후 `shop_impressions`에서 Android + premium 상품의 `slot_order`가 2→12로 이동
-- D-3 이후 Android premium 상품 노출 수 80% 감소, 결제 수 비례 감소
+- D-3 이후 `shop_impressions`에서 Android + premium 상품의 `slot_order`가 1~3 → 4~6으로 이동 (상단 → 중하단)
+- 유저별 스크롤 깊이(3~8)에 의해 premium 노출이 자연스럽게 감소
+- `payments`는 노출된 상품 중에서만 구매 발생 → premium 구매도 자연 감소
 - iOS는 변화 없음
 
 ### 시나리오 2 (D-14: 시즌 이벤트 종료)
 - `content_releases`에 시즌 이벤트(Pizza Festival Season 3) 종료일 = D-14
-- D-14 이후 `events`에서 `event_participate` 타입 이벤트 0건으로 급감
-- D-14 이후 기존 유저(`user_type=existing`)의 `sessions` 복귀율 하락 → D7 리텐션 -12%
+- D-14 이후 `events`에서 `event_participate` 타입 이벤트 0건
+- D-14 이후 설치 7일차(D7 코호트) 유저만 복귀 확률 감소 (30% → 25%) → D7 리텐션 하락
+- DAU 전체에는 영향 거의 없음 (D7 코호트만 영향)
 - 신규 유저는 영향 없음
 
-### 시나리오 3 (D-0 ~ 6시간 전: PG 장애)
+### 시나리오 3 (D-0: PG 장애)
 - `gateways`에서 pagseguro의 status = `degraded`
-- 최근 6시간 `payment_attempts`에서 gateway=pagseguro인 건의 실패율 급등
+- D-0 당일 `payment_attempts`에서 gateway=pagseguro인 건의 실패율 60%로 급등
 - `payment_errors`에 pagseguro 관련 에러 코드(gateway_timeout 등) 집중 발생
 - 다른 PG사(google_play, apple_pay, stripe)는 정상
 - 브라질 외 국가는 pagseguro 사용 안 하므로 영향 없음
+
+---
+
+## 실측 수치 (seed=42, NUM_USERS=3000)
+
+| 시나리오 | 지표 | 실측 |
+|---|---|---|
+| 1. 매출 | 전체 매출 변화 (D-3 전후) | **-11.1%** |
+| 1. 매출 | DAU | 변화 없음 |
+| 2. 리텐션 | DAU 변화 | **-0.6%** (정상 범위) |
+| 2. 리텐션 | D7 리텐션 변화 | **-3.9pp** (0.279 → 0.240) |
+| 2. 리텐션 | event_participate (D-14 이후) | **0건** |
+| 3. 결제 | 전체 결제 성공률 변화 (D-0) | **-5.4pp** (0.978 → 0.924) |
+| 3. 결제 | PagSeguro D-0 실패율 | **56%** (16건 중 9건) |
+| 3. 결제 | 다른 PG사 | 정상 (2% 실패) |
 
 ---
 
