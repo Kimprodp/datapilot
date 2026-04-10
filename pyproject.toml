@@ -1,0 +1,18 @@
+[project]
+name = "datapilot"
+version = "0.1.0"
+description = "Multi-agent game KPI diagnosis copilot"
+requires-python = ">=3.13"
+dependencies = [
+    "langchain-anthropic>=0.3,<0.4",
+    "langchain-core>=0.3,<0.4",
+    "streamlit>=1.45,<2",
+    "duckdb>=1.2,<2",
+    "python-dotenv>=1.0,<2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+]

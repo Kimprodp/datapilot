@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# IntelliJ IDEA
+.idea/
+
+# Claude Code 로컬 설정
+.claude/settings.local.json
+
+# 내부 기획 문서 (Public 레포에 노출 X)
+docs/datapilot-planning.md
