@@ -31,6 +31,7 @@ PRODUCT_PRICES = {
     "p_004": 2500, "p_005": 2000,                  # mid
     "p_006": 5000, "p_007": 9900, "p_008": 7900,   # premium
 }
+RANDOM_SEED = 42
 PREMIUM_PRODUCTS = ["p_006", "p_007", "p_008"]
 NON_PREMIUM_PRODUCTS = ["p_001", "p_002", "p_003", "p_004", "p_005"]
 ALL_PRODUCTS = list(PRODUCT_PRICES.keys())
@@ -289,41 +290,55 @@ def seed_releases(conn: duckdb.DuckDBPyConnection):
 # ── 시나리오 1 트랜잭션: 매출 -8% (Android UI 변경) ──
 
 def seed_payments(conn: duckdb.DuckDBPyConnection):
-    """결제 데이터 30일치. D-3 이후 Android premium 결제 80% 감소."""
+    """결제 데이터 30일치. 상점에서 노출된 상품 중에서만 구매 발생.
+    shop_impressions가 먼저 생성되어 있어야 한다.
+    D-3 이후 Android는 premium 노출이 줄어들어 자연스럽게 premium 구매 감소."""
 
-    users = conn.execute("SELECT user_id, platform FROM users").fetchall()
+    # shop_impressions에서 날짜별 → {유저: 노출 상품 set} 매핑 구성
+    impression_rows = conn.execute("""
+        SELECT CAST(impression_time AS DATE) as d, user_id, product_id
+        FROM shop_impressions
+    """).fetchall()
+
+    # 날짜 → {유저: {상품 set}} 구조
+    daily_impressions: dict[str, dict[str, set]] = {}
+    for d, uid, pid in impression_rows:
+        ds = str(d)
+        if ds not in daily_impressions:
+            daily_impressions[ds] = {}
+        if uid not in daily_impressions[ds]:
+            daily_impressions[ds][uid] = set()
+        daily_impressions[ds][uid].add(pid)
 
     payments = []
-    pid = 0
+    pay_id = 0
 
     for day_offset in range(PERIOD_DAYS):
         current_date = START_DATE + timedelta(days=day_offset)
-        is_after_change = current_date >= UI_CHANGE_DATE
+        ds = str(current_date)
 
-        for user_id, platform in users:
-            if random.random() > 0.07:  # 매일 유저의 7%가 결제
+        # 해당 날짜에 상점 방문한 유저만 구매 대상
+        visitors = daily_impressions.get(ds, {})
+
+        for user_id, visible_products in visitors.items():
+            # 방문 유저 중 28%가 구매 (전체 유저 대비 ~7%: 방문율 25% × 28%)
+            if random.random() > 0.28:
                 continue
 
-            # 상품 선택: 정상 시 premium 30%, D-3 이후 Android는 premium 6%로 감소
-            if is_after_change and platform == "android":
-                product = (random.choice(PREMIUM_PRODUCTS) if random.random() < 0.06
-                           else random.choice(NON_PREMIUM_PRODUCTS))
-            else:
-                product = (random.choice(PREMIUM_PRODUCTS) if random.random() < 0.30
-                           else random.choice(NON_PREMIUM_PRODUCTS))
-
+            # 노출된 상품 중 랜덤 선택 → premium이 안 보였으면 살 수 없음
+            product = random.choice(list(visible_products))
             hour = random.randint(8, 23)
             minute = random.randint(0, 59)
 
             payments.append((
-                f"pay_{pid:06d}",
+                f"pay_{pay_id:06d}",
                 user_id,
                 product,
                 PRODUCT_PRICES[product],
                 f"{current_date} {hour:02d}:{minute:02d}:00",
                 "success",
             ))
-            pid += 1
+            pay_id += 1
 
     conn.executemany("INSERT INTO payments VALUES (?, ?, ?, ?, ?, ?)", payments)
     print(f"payments: {len(payments)}건 삽입")
@@ -352,7 +367,7 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
                 is_premium = product_id in PREMIUM_PRODUCTS
 
                 if is_after_change and platform == "android" and is_premium:
-                    slot = random.randint(10, 15)   # UI 변경 후: 하단으로 밀림
+                    slot = random.randint(4, 6)     # UI 변경 후: 중하단으로 밀림
                 elif is_premium:
                     slot = random.randint(1, 3)     # 정상: 상단
                 else:
@@ -638,6 +653,8 @@ def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
 
 
 def main():
+    random.seed(RANDOM_SEED)  # 재현성 보장: 매번 같은 데이터 생성
+
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
         DB_PATH.unlink()
@@ -652,8 +669,8 @@ def main():
         seed_gateways(conn)
         seed_content_releases(conn)
         seed_releases(conn)
-        seed_payments(conn)
-        seed_shop_impressions(conn)
+        seed_shop_impressions(conn)   # 노출 먼저
+        seed_payments(conn)           # 노출된 상품 중에서만 구매
         seed_sessions(conn)
         seed_events(conn)
         seed_payment_errors(conn)
