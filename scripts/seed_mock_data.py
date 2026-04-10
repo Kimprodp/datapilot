@@ -18,6 +18,22 @@ DB_PATH = Path(__file__).parent.parent / "data" / "datapilot_mock.db"
 BASE_DATE = date(2026, 3, 31)   # 데이터 기간 마지막 날
 PERIOD_DAYS = 30                # 30일치
 NUM_USERS = 2000                # Mock 유저 수 (DAU 규모를 축소한 데모용)
+START_DATE = BASE_DATE - timedelta(days=PERIOD_DAYS - 1)  # 2026-03-02
+
+# 시나리오 핵심 시점
+UI_CHANGE_DATE = BASE_DATE - timedelta(days=3)     # D-3: Android UI 변경 (2026-03-28)
+EVENT_END_DATE = BASE_DATE - timedelta(days=14)    # D-14: 시즌 이벤트 종료 (2026-03-17)
+PG_OUTAGE_DATE = BASE_DATE                         # D-0: PG 장애 (2026-03-31)
+
+# 상품 가격 매핑 (원)
+PRODUCT_PRICES = {
+    "p_001": 100,  "p_002": 500,  "p_003": 900,    # low
+    "p_004": 2500, "p_005": 2000,                  # mid
+    "p_006": 5000, "p_007": 9900, "p_008": 7900,   # premium
+}
+PREMIUM_PRODUCTS = ["p_006", "p_007", "p_008"]
+NON_PREMIUM_PRODUCTS = ["p_001", "p_002", "p_003", "p_004", "p_005"]
+ALL_PRODUCTS = list(PRODUCT_PRICES.keys())
 
 
 def create_tables(conn: duckdb.DuckDBPyConnection):
@@ -118,7 +134,7 @@ def create_tables(conn: duckdb.DuckDBPyConnection):
             user_id     VARCHAR   NOT NULL,
             event_type  VARCHAR   NOT NULL,   -- 'login' / 'stage_clear' / 'purchase' / 'event_participate'
             event_time  TIMESTAMP NOT NULL,
-            metadata    VARCHAR              -- JSON 문자열
+            metadata    VARCHAR               -- JSON 문자열
         )
     """)
 
@@ -184,7 +200,7 @@ def seed_users(conn: duckdb.DuckDBPyConnection):
     platforms = ["android"] * 60 + ["ios"] * 40                         # 60:40
     countries = (["brazil"] * 15 + ["usa"] * 25 + ["korea"] * 20
                  + ["japan"] * 15 + ["india"] * 10 + ["others"] * 15)   # 비율 합 100
-    devices = ["low"] * 30 + ["mid"] * 40 + ["high"] * 30              # 30:40:30
+    devices = ["low"] * 30 + ["mid"] * 40 + ["high"] * 30               # 30:40:30
 
     users = []
     for i in range(NUM_USERS):
@@ -270,6 +286,102 @@ def seed_releases(conn: duckdb.DuckDBPyConnection):
     print(f"releases: {len(releases)}건 삽입")
 
 
+# ── 시나리오 1 트랜잭션: 매출 -8% (Android UI 변경) ──
+
+def seed_payments(conn: duckdb.DuckDBPyConnection):
+    """결제 데이터 30일치. D-3 이후 Android premium 결제 80% 감소."""
+
+    users = conn.execute("SELECT user_id, platform FROM users").fetchall()
+
+    payments = []
+    pid = 0
+
+    for day_offset in range(PERIOD_DAYS):
+        current_date = START_DATE + timedelta(days=day_offset)
+        is_after_change = current_date >= UI_CHANGE_DATE
+
+        for user_id, platform in users:
+            if random.random() > 0.07:  # 매일 유저의 7%가 결제
+                continue
+
+            # 상품 선택: 정상 시 premium 30%, D-3 이후 Android는 premium 6%로 감소
+            if is_after_change and platform == "android":
+                product = (random.choice(PREMIUM_PRODUCTS) if random.random() < 0.06
+                           else random.choice(NON_PREMIUM_PRODUCTS))
+            else:
+                product = (random.choice(PREMIUM_PRODUCTS) if random.random() < 0.30
+                           else random.choice(NON_PREMIUM_PRODUCTS))
+
+            hour = random.randint(8, 23)
+            minute = random.randint(0, 59)
+
+            payments.append((
+                f"pay_{pid:06d}",
+                user_id,
+                product,
+                PRODUCT_PRICES[product],
+                f"{current_date} {hour:02d}:{minute:02d}:00",
+                "success",
+            ))
+            pid += 1
+
+    conn.executemany("INSERT INTO payments VALUES (?, ?, ?, ?, ?, ?)", payments)
+    print(f"payments: {len(payments)}건 삽입")
+
+
+def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
+    """상점 노출 로그 30일치. 유저별 스크롤 깊이(3~8)만큼만 노출 기록.
+    D-3 이후 Android는 premium이 하단(10~15)으로 밀려서 자연스럽게 노출 급감."""
+
+    users = conn.execute("SELECT user_id, platform FROM users").fetchall()
+
+    impressions = []
+    iid = 0
+
+    for day_offset in range(PERIOD_DAYS):
+        current_date = START_DATE + timedelta(days=day_offset)
+        is_after_change = current_date >= UI_CHANGE_DATE
+
+        for user_id, platform in users:
+            if random.random() > 0.25:  # 매일 유저의 25%가 상점 방문
+                continue
+
+            # 각 상품의 slot_order 결정
+            product_slots = []
+            for product_id in ALL_PRODUCTS:
+                is_premium = product_id in PREMIUM_PRODUCTS
+
+                if is_after_change and platform == "android" and is_premium:
+                    slot = random.randint(10, 15)   # UI 변경 후: 하단으로 밀림
+                elif is_premium:
+                    slot = random.randint(1, 3)     # 정상: 상단
+                else:
+                    slot = random.randint(4, 8)     # 일반 상품: 중하단
+
+                product_slots.append((product_id, slot))
+
+            # slot_order 순 정렬 → 스크롤 깊이만큼만 노출
+            product_slots.sort(key=lambda x: x[1])
+            scroll_depth = random.randint(3, 8)  # 3개는 무조건, 최대 8개
+            visible = product_slots[:scroll_depth]
+
+            hour = random.randint(9, 22)
+            minute = random.randint(0, 59)
+
+            for product_id, slot_order in visible:
+                impressions.append((
+                    f"imp_{iid:07d}",
+                    user_id,
+                    product_id,
+                    f"{current_date} {hour:02d}:{minute:02d}:00",
+                    slot_order,
+                ))
+                iid += 1
+
+    conn.executemany("INSERT INTO shop_impressions VALUES (?, ?, ?, ?, ?)", impressions)
+    print(f"shop_impressions: {len(impressions)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -285,7 +397,10 @@ def main():
         seed_gateways(conn)
         seed_content_releases(conn)
         seed_releases(conn)
-        # TODO: 트랜잭션 데이터 삽입
+        seed_payments(conn)
+        seed_shop_impressions(conn)
+        # TODO: 시나리오 2 트랜잭션 (events, sessions)
+        # TODO: 시나리오 3 트랜잭션 (payment_attempts, payment_errors)
         # TODO: daily_kpi 집계
         print(f"\nDB 생성 완료: {DB_PATH}")
     finally:
