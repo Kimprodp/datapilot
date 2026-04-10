@@ -164,6 +164,4 @@ DataPilot은 에이전트형 도구다. UX에서 이를 반영한다:
 - [ ] AI 출력임을 숨기지 않으면서도 신뢰감을 주는가?
 
 ## 참조 문서
-
-- 노션 기획 문서: `과제 전형 — DataPilot` (특히 2-4 User Flow)
 - 상세 기획 문서: `docs/datapilot-planning.md`
