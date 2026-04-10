@@ -457,6 +457,91 @@ def seed_events(conn: duckdb.DuckDBPyConnection):
     print(f"events: {len(events)}건 삽입")
 
 
+# ── 시나리오 3 트랜잭션: 결제 성공률 -25% (PG 장애) ──
+
+def seed_payment_errors(conn: duckdb.DuckDBPyConnection):
+    """결제 에러 코드 마스터. pagseguro 에러가 D-0에 집중 발생."""
+
+    payment_errors = [
+        ("E001", "Gateway timeout",      "pagseguro",   f"{PG_OUTAGE_DATE} 18:00:00"),
+        ("E002", "Connection refused",   "pagseguro",   f"{PG_OUTAGE_DATE} 18:15:00"),
+        ("E003", "Service unavailable",  "pagseguro",   f"{PG_OUTAGE_DATE} 18:30:00"),
+        ("E004", "Transaction declined", "google_play", "2026-03-05 10:00:00"),
+        ("E005", "Insufficient funds",   "stripe",      "2026-03-08 14:00:00"),
+    ]
+
+    conn.executemany("INSERT INTO payment_errors VALUES (?, ?, ?, ?)", payment_errors)
+    print(f"payment_errors: {len(payment_errors)}건 삽입")
+
+
+def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
+    """결제 시도 로그 30일치. D-0에 pagseguro(브라질) 실패율 급등.
+    - 브라질 유저: 70% pagseguro, 나머지 google_play/apple_pay/stripe
+    - 비브라질 유저: android=google_play, ios=apple_pay
+    - 정상 실패율 2%, D-0 pagseguro만 50% 실패"""
+
+    users = conn.execute(
+        "SELECT user_id, platform, country FROM users"
+    ).fetchall()
+
+    pg_error_codes = ["E001", "E002", "E003"]  # pagseguro 에러
+    general_error_codes = ["E004", "E005"]       # 일반 에러
+
+    attempts = []
+    aid = 0
+
+    for day_offset in range(PERIOD_DAYS):
+        current_date = START_DATE + timedelta(days=day_offset)
+        is_outage_day = current_date == PG_OUTAGE_DATE
+
+        for user_id, platform, country in users:
+            if random.random() > 0.07:  # 매일 유저 7%가 결제 시도
+                continue
+
+            # gateway 배정
+            if country == "brazil":
+                r = random.random()
+                if r < 0.70:
+                    gateway = "pagseguro"
+                elif r < 0.85:
+                    gateway = "google_play" if platform == "android" else "apple_pay"
+                else:
+                    gateway = "stripe"
+            else:
+                if random.random() < 0.95:
+                    gateway = "google_play" if platform == "android" else "apple_pay"
+                else:
+                    gateway = "stripe"
+
+            # 실패 여부: 정상 2%, D-0 pagseguro만 50%
+            if is_outage_day and gateway == "pagseguro":
+                failed = random.random() < 0.50
+            else:
+                failed = random.random() < 0.02
+
+            status = "failed" if failed else "success"
+            error_code = None
+            if failed:
+                error_code = (random.choice(pg_error_codes) if gateway == "pagseguro"
+                              else random.choice(general_error_codes))
+
+            hour = random.randint(8, 23)
+            minute = random.randint(0, 59)
+
+            attempts.append((
+                f"att_{aid:06d}",
+                user_id,
+                gateway,
+                f"{current_date} {hour:02d}:{minute:02d}:00",
+                status,
+                error_code,
+            ))
+            aid += 1
+
+    conn.executemany("INSERT INTO payment_attempts VALUES (?, ?, ?, ?, ?, ?)", attempts)
+    print(f"payment_attempts: {len(attempts)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -476,7 +561,8 @@ def main():
         seed_shop_impressions(conn)
         seed_sessions(conn)
         seed_events(conn)
-        # TODO: 시나리오 3 트랜잭션 (payment_attempts, payment_errors)
+        seed_payment_errors(conn)
+        seed_payment_attempts(conn)
         # TODO: daily_kpi 집계
         print(f"\nDB 생성 완료: {DB_PATH}")
     finally:
