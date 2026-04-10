@@ -382,6 +382,81 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
     print(f"shop_impressions: {len(impressions)}건 삽입")
 
 
+# ── 시나리오 2 트랜잭션: D7 리텐션 -12% (이벤트 종료) ──
+
+def seed_sessions(conn: duckdb.DuckDBPyConnection):
+    """세션 로그 30일치. D-14 이후 기존 유저 접속률 30% 감소."""
+
+    users = conn.execute("SELECT user_id, platform, user_type FROM users").fetchall()
+
+    sessions = []
+    sid = 0
+
+    for day_offset in range(PERIOD_DAYS):
+        current_date = START_DATE + timedelta(days=day_offset)
+        is_after_event_end = current_date >= EVENT_END_DATE
+
+        for user_id, platform, user_type in users:
+            # 접속 확률: 정상 30%, D-14 이후 기존 유저만 21%로 감소 (30% 하락)
+            login_rate = 0.30
+            if is_after_event_end and user_type == "existing":
+                login_rate = 0.21
+
+            if random.random() > login_rate:
+                continue
+
+            hour = random.randint(7, 23)
+            minute = random.randint(0, 59)
+            duration_min = random.randint(3, 30)  # 3~30분
+
+            sessions.append((
+                f"s_{sid:06d}",
+                user_id,
+                f"{current_date} {hour:02d}:{minute:02d}:00",
+                f"{current_date} {hour:02d}:{min(minute + duration_min, 59):02d}:00",
+                platform,
+            ))
+            sid += 1
+
+    conn.executemany("INSERT INTO sessions VALUES (?, ?, ?, ?, ?)", sessions)
+    print(f"sessions: {len(sessions)}건 삽입")
+
+
+def seed_events(conn: duckdb.DuckDBPyConnection):
+    """인게임 이벤트 로그. 세션 기반으로 생성.
+    - stage_clear: 세션당 50% 확률로 1회
+    - event_participate: 이벤트 기간(~D-14) 중에만 발생, 이후 0건으로 급감"""
+
+    sessions_data = conn.execute(
+        "SELECT session_id, user_id, session_start FROM sessions"
+    ).fetchall()
+
+    events = []
+    eid = 0
+
+    for session_id, user_id, session_start in sessions_data:
+        session_date_str = str(session_start)[:10]
+
+        # stage_clear (세션당 50% 확률로 1회)
+        if random.random() < 0.5:
+            events.append((
+                f"e_{eid:07d}", user_id, "stage_clear",
+                str(session_start), None,
+            ))
+            eid += 1
+
+        # event_participate (이벤트 기간 중에만, 세션당 40% 확률)
+        if session_date_str <= str(EVENT_END_DATE) and random.random() < 0.4:
+            events.append((
+                f"e_{eid:07d}", user_id, "event_participate",
+                str(session_start), '{"event": "pizza_festival_s3"}',
+            ))
+            eid += 1
+
+    conn.executemany("INSERT INTO events VALUES (?, ?, ?, ?, ?)", events)
+    print(f"events: {len(events)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -399,7 +474,8 @@ def main():
         seed_releases(conn)
         seed_payments(conn)
         seed_shop_impressions(conn)
-        # TODO: 시나리오 2 트랜잭션 (events, sessions)
+        seed_sessions(conn)
+        seed_events(conn)
         # TODO: 시나리오 3 트랜잭션 (payment_attempts, payment_errors)
         # TODO: daily_kpi 집계
         print(f"\nDB 생성 완료: {DB_PATH}")
