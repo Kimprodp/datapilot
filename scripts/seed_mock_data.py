@@ -530,7 +530,7 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
 
             # 실패 여부: 정상 2%, D-0 pagseguro만 50%
             if is_outage_day and gateway == "pagseguro":
-                failed = random.random() < 0.50
+                failed = random.random() < 0.80
             else:
                 failed = random.random() < 0.02
 

@@ -10,8 +10,8 @@
 | 항목 | 값 |
 |---|---|
 | game_id | `pizza_ready` |
-| 데이터 기간 | 30일 (2026-03-10 ~ 2026-04-08) |
-| DAU 규모 | 약 5만 |
+| 데이터 기간 | 30일 (2026-03-02 ~ 2026-03-31) |
+| DAU 규모 | 약 500~600 (데모 축소, 유저 2000명 기준) |
 | 이상 지표 | 3개 동시 발생 (서로 다른 원인) |
 
 ---
@@ -20,9 +20,9 @@
 
 | # | 이상 지표 | 세그먼트 | 숨겨진 원인 | 흔적 시점 | 관련 테이블 |
 |---|---|---|---|---|---|
-| 1 | 인앱결제 매출 -8% | Android | 앱 업데이트로 상점 UI 진열 순서 변경 | 3일 전 (D-3) | users, payments, products, shop_impressions, releases |
+| 1 | 인앱결제 매출 감소 (~15%) | Android | 앱 업데이트로 상점 UI 진열 순서 변경 | 3일 전 (D-3) | users, payments, products, shop_impressions, releases |
 | 2 | D7 리텐션 -12% | 기존 유저 | 시즌 이벤트 종료 후 컨텐츠 공백 | 2주 전 (D-14) | users, events, sessions, content_releases |
-| 3 | 결제 성공률 -25% | 브라질 | 지역 PG사(PagSeguro) 부분 장애 | 6시간 전 (D-0) | users, payment_attempts, payment_errors, gateways |
+| 3 | 결제 성공률 감소 (~8%p) | 브라질 | 지역 PG사(PagSeguro) 장애 | D-0 당일 | users, payment_attempts, payment_errors, gateways |
 
 ---
 
@@ -50,10 +50,10 @@
 | new_installs | INTEGER | 신규 설치 수 |
 
 **이상 반영 규칙**:
-- 매출: D-3부터 전주 대비 -8% 추세 (Android 기여분)
-- D7 리텐션: D-14부터 -12% 추세 (기존 유저 기여분)
-- 결제 성공률: D-0(최근 6시간)에 -25% 급락 (브라질/PagSeguro 기여분)
-- DAU, MAU, 세션 수, 신규 설치 등은 정상 범위 유지 (이상 아님)
+- 매출: D-3부터 ~15% 감소 추세 (Android premium 노출 감소 → 구매 감소)
+- D7 리텐션: D-14부터 -12% 추세 (기존 유저 기여분). DAU도 동반 하락 (~20%) — 리텐션과 DAU는 실제로 연동되므로 자연스러운 현상
+- 결제 성공률: D-0 당일 ~8%p 하락 (브라질/PagSeguro 장애, 실패율 80%)
+- MAU, 신규 설치 등은 정상 범위 유지
 
 ### 공통
 
