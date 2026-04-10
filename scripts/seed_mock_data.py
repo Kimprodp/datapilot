@@ -542,6 +542,101 @@ def seed_payment_attempts(conn: duckdb.DuckDBPyConnection):
     print(f"payment_attempts: {len(attempts)}건 삽입")
 
 
+# ── daily_kpi 집계 (raw 테이블 기반) ──
+
+def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
+    """raw 테이블에서 일별 KPI를 집계해 daily_kpi에 삽입.
+    직접 SQL로 계산하므로 raw ↔ daily_kpi 수치가 반드시 일치한다."""
+
+    kpi_rows = []
+
+    for day_offset in range(PERIOD_DAYS):
+        d = START_DATE + timedelta(days=day_offset)
+        ds = str(d)  # '2026-03-02' 형태
+
+        # DAU: 해당 날짜에 세션이 있는 유니크 유저
+        dau = conn.execute(f"""
+            SELECT COUNT(DISTINCT user_id) FROM sessions
+            WHERE CAST(session_start AS DATE) = '{ds}'
+        """).fetchone()[0]
+
+        # MAU: 최근 30일 윈도우 활성 유저
+        mau_start = str(d - timedelta(days=29))
+        mau = conn.execute(f"""
+            SELECT COUNT(DISTINCT user_id) FROM sessions
+            WHERE CAST(session_start AS DATE) BETWEEN '{mau_start}' AND '{ds}'
+        """).fetchone()[0]
+
+        # Revenue: 해당 날짜 성공 결제 합계
+        revenue = conn.execute(f"""
+            SELECT COALESCE(SUM(amount), 0) FROM payments
+            WHERE CAST(timestamp AS DATE) = '{ds}' AND status = 'success'
+        """).fetchone()[0]
+
+        # ARPPU: revenue / 결제 유저 수
+        paying = conn.execute(f"""
+            SELECT COUNT(DISTINCT user_id) FROM payments
+            WHERE CAST(timestamp AS DATE) = '{ds}' AND status = 'success'
+        """).fetchone()[0]
+        arppu = float(revenue) / paying if paying > 0 else 0
+
+        # D1 Retention: 어제 설치 유저 중 오늘 접속 비율
+        yesterday = str(d - timedelta(days=1))
+        d1_total = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{yesterday}'").fetchone()[0]
+        d1_returned = conn.execute(f"""
+            SELECT COUNT(DISTINCT u.user_id) FROM users u
+            JOIN sessions s ON u.user_id = s.user_id
+            WHERE u.install_date = '{yesterday}' AND CAST(s.session_start AS DATE) = '{ds}'
+        """).fetchone()[0]
+        d1_ret = d1_returned / d1_total if d1_total > 0 else 0
+
+        # D7 Retention: 7일 전 설치 유저 중 오늘 접속 비율
+        d7_ago = str(d - timedelta(days=7))
+        d7_total = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{d7_ago}'").fetchone()[0]
+        d7_returned = conn.execute(f"""
+            SELECT COUNT(DISTINCT u.user_id) FROM users u
+            JOIN sessions s ON u.user_id = s.user_id
+            WHERE u.install_date = '{d7_ago}' AND CAST(s.session_start AS DATE) = '{ds}'
+        """).fetchone()[0]
+        d7_ret = d7_returned / d7_total if d7_total > 0 else 0
+
+        # Sessions: 총 세션 수
+        total_sessions = conn.execute(f"""
+            SELECT COUNT(*) FROM sessions WHERE CAST(session_start AS DATE) = '{ds}'
+        """).fetchone()[0]
+
+        # Avg Session Sec: 평균 세션 길이
+        avg_sec = conn.execute(f"""
+            SELECT COALESCE(AVG(
+                EXTRACT(EPOCH FROM (session_end::TIMESTAMP - session_start::TIMESTAMP))
+            ), 0) FROM sessions
+            WHERE CAST(session_start AS DATE) = '{ds}'
+        """).fetchone()[0]
+
+        # Payment Success Rate: 결제 시도 성공률
+        att_total = conn.execute(f"""
+            SELECT COUNT(*) FROM payment_attempts WHERE CAST(attempt_time AS DATE) = '{ds}'
+        """).fetchone()[0]
+        att_success = conn.execute(f"""
+            SELECT COUNT(*) FROM payment_attempts
+            WHERE CAST(attempt_time AS DATE) = '{ds}' AND status = 'success'
+        """).fetchone()[0]
+        success_rate = att_success / att_total if att_total > 0 else 1.0
+
+        # New Installs: 해당 날짜 설치 유저 수
+        new_installs = conn.execute(f"SELECT COUNT(*) FROM users WHERE install_date = '{ds}'").fetchone()[0]
+
+        kpi_rows.append((
+            d, dau, mau, float(revenue), round(arppu, 2),
+            round(d1_ret, 4), round(d7_ret, 4),
+            total_sessions, int(avg_sec),
+            round(success_rate, 4), new_installs,
+        ))
+
+    conn.executemany("INSERT INTO daily_kpi VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", kpi_rows)
+    print(f"daily_kpi: {len(kpi_rows)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -563,7 +658,7 @@ def main():
         seed_events(conn)
         seed_payment_errors(conn)
         seed_payment_attempts(conn)
-        # TODO: daily_kpi 집계
+        seed_daily_kpi(conn)
         print(f"\nDB 생성 완료: {DB_PATH}")
     finally:
         conn.close()
