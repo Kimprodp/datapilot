@@ -8,10 +8,16 @@ Pizza Ready 30일치 Mock 데이터를 삽입한다.
 실행: uv run python scripts/seed_mock_data.py
 """
 
+import random
+from datetime import date, timedelta
+
 import duckdb
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "data" / "datapilot_mock.db"
+BASE_DATE = date(2026, 3, 31)   # 데이터 기간 마지막 날
+PERIOD_DAYS = 30                # 30일치
+NUM_USERS = 2000                # Mock 유저 수 (DAU 규모를 축소한 데모용)
 
 
 def create_tables(conn: duckdb.DuckDBPyConnection):
@@ -170,6 +176,40 @@ def create_tables(conn: duckdb.DuckDBPyConnection):
     print("12개 테이블 생성 완료")
 
 
+def seed_users(conn: duckdb.DuckDBPyConnection):
+    """유저 마스터 데이터 생성 (2000명)"""
+
+    # 분포 가중치 리스트 — random.choice가 이 리스트에서 하나를 뽑으면 자연스럽게 비율이 맞음
+    # Random.nextInt로 뽑는 것과 동일
+    platforms = ["android"] * 60 + ["ios"] * 40                         # 60:40
+    countries = (["brazil"] * 15 + ["usa"] * 25 + ["korea"] * 20
+                 + ["japan"] * 15 + ["india"] * 10 + ["others"] * 15)   # 비율 합 100
+    devices = ["low"] * 30 + ["mid"] * 40 + ["high"] * 30              # 30:40:30
+
+    users = []
+    for i in range(NUM_USERS):
+        # new = 최근 7일 이내 설치, existing = 그 이전
+        is_new = random.random() < 0.3  # 30% 확률로 new
+        if is_new:
+            install = BASE_DATE - timedelta(days=random.randint(0, 6))
+            user_type = "new"
+        else:
+            install = BASE_DATE - timedelta(days=random.randint(7, 90))
+            user_type = "existing"
+
+        users.append((
+            f"u_{i:05d}",           # "u_00000", "u_00001", ...
+            random.choice(platforms),
+            random.choice(countries),
+            user_type,
+            install,
+            random.choice(devices),
+        ))
+
+    conn.executemany("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)", users)
+    print(f"users: {len(users)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -180,7 +220,10 @@ def main():
 
     try:
         create_tables(conn)
-        # TODO: 2단계 - 데이터 삽입 함수 호출
+        seed_users(conn)
+        # TODO: 마스터 데이터 삽입
+        # TODO: 트랜잭션 데이터 삽입
+        # TODO: daily_kpi 집계
         print(f"\nDB 생성 완료: {DB_PATH}")
     finally:
         conn.close()
