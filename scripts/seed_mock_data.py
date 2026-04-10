@@ -210,6 +210,66 @@ def seed_users(conn: duckdb.DuckDBPyConnection):
     print(f"users: {len(users)}건 삽입")
 
 
+def seed_products(conn: duckdb.DuckDBPyConnection):
+    """상품 마스터 데이터 (8개)"""
+
+    products = [
+        ("p_001", "Mini Coins",         "low",     "consumable"),
+        ("p_002", "Coin Pack 100",      "low",     "consumable"),
+        ("p_003", "Daily Deal",         "low",     "consumable"),
+        ("p_004", "Booster Pack",       "mid",     "package"),
+        ("p_005", "Coin Pack 500",      "mid",     "consumable"),
+        ("p_006", "Pizza Starter Pack", "premium", "package"),
+        ("p_007", "Premium Chef Pack",  "premium", "package"),
+        ("p_008", "VIP Pass",           "premium", "subscription"),
+    ]
+
+    conn.executemany("INSERT INTO products VALUES (?, ?, ?, ?)", products)
+    print(f"products: {len(products)}건 삽입")
+
+
+def seed_gateways(conn: duckdb.DuckDBPyConnection):
+    """PG사 정보 (4개). pagseguro만 degraded 상태."""
+
+    gateways = [
+        ("google_play", "Google Play",  "global", "active"),
+        ("apple_pay",   "Apple Pay",    "global", "active"),
+        ("pagseguro",   "PagSeguro",    "brazil", "degraded"),
+        ("stripe",      "Stripe",       "global", "active"),
+    ]
+
+    conn.executemany("INSERT INTO gateways VALUES (?, ?, ?, ?)", gateways)
+    print(f"gateways: {len(gateways)}건 삽입")
+
+
+def seed_content_releases(conn: duckdb.DuckDBPyConnection):
+    """컨텐츠/이벤트 스케줄. 시즌 이벤트가 D-14(3/17)에 종료."""
+
+    content_releases = [
+        ("c_001", "season_event", "Pizza Festival Season 3",  date(2026, 2, 10), date(2026, 3, 17)),
+        ("c_002", "update",       "Spring Content Update",    date(2026, 2, 20), date(2026, 4, 15)),
+        ("c_003", "promotion",    "New Player Welcome Bonus", date(2026, 3, 1),  date(2026, 3, 31)),
+    ]
+
+    conn.executemany("INSERT INTO content_releases VALUES (?, ?, ?, ?, ?)", content_releases)
+    print(f"content_releases: {len(content_releases)}건 삽입")
+
+
+def seed_releases(conn: duckdb.DuckDBPyConnection):
+    """빌드 배포 이력. D-3(3/28)에 Android 배포."""
+
+    releases = [
+        ("r_001", "v1.2.0", "both",    "2026-02-20 10:00:00", "Monthly content update"),
+        ("r_002", "v1.2.1", "android", "2026-03-08 14:00:00", "Bug fixes and stability improvements"),
+        ("r_003", "v1.2.2", "ios",     "2026-03-12 11:00:00", "Performance improvements"),
+        ("r_004", "v1.2.3", "android", "2026-03-28 09:00:00", "Shop UI refresh (featured slot reordering)"),
+        ("r_005", "v1.2.4", "ios",     "2026-03-29 15:00:00", "Minor bug fixes"),
+    ]
+
+    conn.executemany("INSERT INTO releases VALUES (?, ?, ?, ?, ?)", releases)
+    print(f"releases: {len(releases)}건 삽입")
+
+
 def main():
     # 기존 DB 파일 있으면 삭제 후 재생성
     if DB_PATH.exists():
@@ -221,7 +281,10 @@ def main():
     try:
         create_tables(conn)
         seed_users(conn)
-        # TODO: 마스터 데이터 삽입
+        seed_products(conn)
+        seed_gateways(conn)
+        seed_content_releases(conn)
+        seed_releases(conn)
         # TODO: 트랜잭션 데이터 삽입
         # TODO: daily_kpi 집계
         print(f"\nDB 생성 완료: {DB_PATH}")
