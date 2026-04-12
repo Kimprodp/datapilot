@@ -106,29 +106,30 @@ def _format_elapsed(seconds: float) -> str:
 
 
 def _render_anomaly_summary(anomaly_item) -> None:
-    """이상 지표 요약 카드. screen-spec 3.4 / 3.10.1."""
+    """이상 지표 요약 카드. 와이어프레임: 세로 row 레이아웃 (label + value)."""
+    a = anomaly_item
     with st.container(border=True):
         st.markdown(
             "**이상 지표 요약** "
             "<span style='color:#999;font-size:12px;float:right;'>① 병목 감지</span>",
             unsafe_allow_html=True,
         )
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**지표**: {anomaly_item.metric_label}")
+        # 세로 row 형태 (와이어프레임 kpi-row 패턴)
+        rows = [
+            ("지표", f"<strong>{a.metric_label}</strong>"),
+            ("변화율", f"<span style='color:#e74c3c;'>{a.change_display}</span>"
+                       f"<br><span style='font-size:12px;color:#888;'>{a.comparison_detail}</span>"),
+            ("심각도", f"<strong>{a.severity}</strong>"),
+            ("판정 근거", f"<span style='font-weight:400;'>{a.reasoning}</span>"),
+        ]
+        for label, value in rows:
             st.markdown(
-                f"**심각도**: {_severity_badge(anomaly_item.severity)}",
+                f"<div style='padding:10px 0;border-bottom:1px solid #f0f0f0;'>"
+                f"<div style='font-size:12px;color:#999;margin-bottom:3px;'>{label}</div>"
+                f"<div style='font-size:14px;font-weight:600;line-height:1.5;'>{value}</div>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
-        with col2:
-            st.markdown(f"**변화율**: :red[{anomaly_item.change_display}]")
-            st.caption(anomaly_item.comparison_detail)
-        st.markdown("**판정 근거**")
-        st.markdown(
-            f"<div style='font-size:13px;color:#555;line-height:1.6;'>"
-            f"{anomaly_item.reasoning}</div>",
-            unsafe_allow_html=True,
-        )
 
 
 # ------------------------------------------------------------------
@@ -357,10 +358,19 @@ def page_report() -> None:
         _render_unanalyzed(selected_data)
 
     st.divider()
-    if st.button("새 분석 시작", type="primary", use_container_width=True):
-        st.session_state.page = "start"
-        st.session_state.pop("selected_anomaly_idx", None)
-        st.rerun()
+    # 버튼 세로 높이 키우기 (CSS)
+    st.markdown(
+        "<style>.big-button button { padding-top: 16px !important; "
+        "padding-bottom: 16px !important; font-size: 16px !important; }</style>",
+        unsafe_allow_html=True,
+    )
+    with st.container():
+        st.markdown('<div class="big-button">', unsafe_allow_html=True)
+        if st.button("새 분석 시작", type="primary", use_container_width=True):
+            st.session_state.page = "start"
+            st.session_state.pop("selected_anomaly_idx", None)
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
@@ -380,17 +390,22 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
         st.markdown(f":red[{seg.summary}]")
 
         for dim, values in seg.breakdown.items():
-            st.caption(f"{dim}별 변화율")
+            # 그룹 제목: 해당 차트 바로 위에 붙도록 margin-top 추가
+            st.markdown(
+                f"<div style='font-size:12px;color:#888;margin-top:16px;margin-bottom:6px;'>"
+                f"{dim}별 변화율</div>",
+                unsafe_allow_html=True,
+            )
             for seg_name, change_val in values.items():
                 color = "red" if change_val < 0 else "green"
                 pct = f"{change_val:+.1%}" if abs(change_val) < 1 else f"{change_val:+.0%}"
                 bar_width = min(abs(change_val) * 500, 100)
                 st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:8px;margin:2px 0;'>"
-                    f"<span style='width:80px;text-align:right;font-size:12px;color:#666;'>{seg_name}</span>"
-                    f"<div style='flex:1;height:16px;background:#eee;border-radius:3px;'>"
-                    f"<div style='width:{bar_width}%;height:100%;background:{color};border-radius:3px;opacity:0.5;'></div></div>"
-                    f"<span style='width:50px;font-size:12px;font-weight:600;color:{color};'>{pct}</span>"
+                    f"<div style='display:flex;align-items:center;gap:12px;margin:4px 0;'>"
+                    f"<span style='width:80px;text-align:right;font-size:13px;color:#555;'>{seg_name}</span>"
+                    f"<div style='flex:1;height:20px;background:#eee;border-radius:4px;'>"
+                    f"<div style='width:{bar_width}%;height:100%;background:{color};border-radius:4px;opacity:0.5;'></div></div>"
+                    f"<span style='width:55px;font-size:13px;font-weight:600;color:{color};'>{pct}</span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -414,12 +429,12 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
             ev_color = "#555" if vr.status == "supported" else "#888"
             ev_text = vr.evidence or vr.required_data or ""
             st.markdown(
-                f"<div style='display:flex;align-items:flex-start;gap:8px;padding:8px 0;"
+                f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
                 f"border-bottom:1px solid #f0f0f0;'>"
-                f"<div style='flex-shrink:0;'>{badge}</div>"
+                f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
                 f"<div>"
-                f"<div style='font-size:13px;font-weight:500;'>{vr.hypothesis}</div>"
-                f"<div style='font-size:11px;color:{ev_color};margin-top:3px;'>{ev_text}</div>"
+                f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
+                f"<div style='font-size:12px;color:{ev_color};margin-top:4px;line-height:1.5;'>{ev_text}</div>"
                 f"</div></div>",
                 unsafe_allow_html=True,
             )
@@ -439,24 +454,24 @@ def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
             chain_len = len(rc.root_cause.chain)
             for step_idx, step in enumerate(rc.root_cause.chain, 1):
                 st.markdown(
-                    f"<div style='display:flex;align-items:flex-start;gap:10px;padding:6px 0;'>"
-                    f"<div style='width:22px;height:22px;border-radius:50%;background:#e74c3c;color:#fff;"
-                    f"font-size:11px;font-weight:700;display:flex;align-items:center;"
+                    f"<div style='display:flex;align-items:flex-start;gap:12px;padding:8px 0;'>"
+                    f"<div style='width:24px;height:24px;border-radius:50%;background:#e74c3c;color:#fff;"
+                    f"font-size:12px;font-weight:700;display:flex;align-items:center;"
                     f"justify-content:center;flex-shrink:0;'>{step_idx}</div>"
-                    f"<div><div style='font-size:13px;font-weight:500;'>{step.step}</div>"
-                    f"<div style='font-size:11px;color:#888;margin-top:2px;'>근거: {step.evidence}</div>"
+                    f"<div><div style='font-size:14px;font-weight:500;'>{step.step}</div>"
+                    f"<div style='font-size:12px;color:#888;margin-top:3px;line-height:1.5;'>근거: {step.evidence}</div>"
                     f"</div></div>",
                     unsafe_allow_html=True,
                 )
                 if step_idx < chain_len:
                     st.markdown(
-                        "<div style='padding-left:8px;color:#ccc;'>↓</div>",
+                        "<div style='padding-left:10px;color:#ccc;font-size:16px;'>↓</div>",
                         unsafe_allow_html=True,
                     )
             st.markdown(
-                f"<div style='margin-top:8px;padding:10px;background:#fef7f7;"
-                f"border-left:3px solid #e74c3c;border-radius:4px;"
-                f"font-size:13px;color:#c0392b;font-weight:500;'>"
+                f"<div style='margin-top:10px;padding:12px;background:#fef7f7;"
+                f"border-left:3px solid #e74c3c;border-radius:6px;"
+                f"font-size:14px;color:#c0392b;font-weight:500;'>"
                 f"<strong>결론:</strong> {rc.root_cause.summary}</div>",
                 unsafe_allow_html=True,
             )
@@ -465,13 +480,13 @@ def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
 
         if rc.additional_investigation:
             items_html = "".join(
-                f"<div style='font-size:12px;color:#888;'>- {inv.hypothesis} ({inv.required_data})</div>"
+                f"<div style='font-size:13px;color:#666;padding:3px 0;'>- {inv.hypothesis}</div>"
                 for inv in rc.additional_investigation
             )
             st.markdown(
-                f"<div style='margin-top:10px;padding:10px;background:#f8f9fa;"
+                f"<div style='margin-top:12px;padding:12px;background:#f8f9fa;"
                 f"border:1px dashed #ccc;border-radius:6px;'>"
-                f"<div style='font-size:12px;font-weight:600;color:#666;margin-bottom:4px;'>"
+                f"<div style='font-size:13px;font-weight:600;color:#555;margin-bottom:6px;'>"
                 f"추가 검토 필요</div>{items_html}</div>",
                 unsafe_allow_html=True,
             )
@@ -493,17 +508,22 @@ def _render_action_card(analysis: AnomalyAnalysis) -> None:
             action_label, bg, fg = _PRIORITY_BADGE.get(action.priority, ("?", "#eee", "#333"))
             badge = _badge_html(action_label, bg, fg)
             st.markdown(
-                f"<div style='display:flex;align-items:flex-start;gap:8px;padding:8px 0;"
+                f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
                 f"border-bottom:1px solid #f0f0f0;'>"
-                f"<div style='flex-shrink:0;'>{badge}</div>"
+                f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
                 f"<div>"
-                f"<div style='font-size:13px;font-weight:600;'>{action.title}</div>"
-                f"<div style='font-size:11px;color:#888;margin-top:2px;'>효과: {action.effect}</div>"
-                f"<div style='font-size:11px;color:#888;'>리소스: {action.effort}</div>"
+                f"<div style='font-size:14px;font-weight:600;'>{action.title}</div>"
+                f"<div style='font-size:12px;color:#888;margin-top:3px;'>효과: {action.effect}</div>"
+                f"<div style='font-size:12px;color:#888;'>리소스: {action.effort}</div>"
                 f"</div></div>",
                 unsafe_allow_html=True,
             )
         if analysis.action_plan.note:
+            st.markdown(
+                "<div style='font-size:13px;font-weight:600;color:#555;"
+                "margin-top:12px;margin-bottom:4px;'>참고</div>",
+                unsafe_allow_html=True,
+            )
             st.info(analysis.action_plan.note)
 
 
