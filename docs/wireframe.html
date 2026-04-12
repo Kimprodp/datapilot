@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataPilot Wireframe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+
+  /* 각 화면을 세로로 나열 */
+  .screen {
+    width: 720px; margin: 40px auto; background: #fff;
+    border: 2px solid #ccc; border-radius: 8px; overflow: hidden;
+  }
+  .screen-label {
+    background: #333; color: #fff; padding: 8px 16px;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+  }
+  .screen-body { padding: 32px; }
+
+  /* 공통 */
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #444; }
+  h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { font-size: 13px; color: #888; margin-bottom: 24px; }
+  .divider { border: none; border-top: 1px solid #e0e0e0; margin: 24px 0; }
+
+  /* 폼 요소 (와이어프레임 스타일) */
+  .form-group { margin-bottom: 20px; }
+  .form-label { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 6px; display: block; }
+  .select-mock {
+    width: 100%; padding: 10px 12px; border: 1.5px solid #ccc; border-radius: 6px;
+    background: #fafafa; font-size: 14px; color: #333;
+  }
+  .radio-group { display: flex; gap: 16px; margin-top: 4px; }
+  .radio-item {
+    padding: 8px 16px; border: 1.5px solid #ccc; border-radius: 6px;
+    font-size: 13px; background: #fafafa; cursor: pointer;
+  }
+  .radio-item.selected { border-color: #e74c3c; background: #fef2f2; color: #e74c3c; font-weight: 600; }
+  .btn-primary {
+    width: 100%; padding: 14px; background: #e74c3c; color: #fff;
+    border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+    cursor: pointer; margin-top: 8px;
+  }
+
+  /* 진행 상태 */
+  .progress-steps { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 16px; border-bottom: 1px solid #f0f0f0;
+  }
+  .step:last-child { border-bottom: none; }
+  .step-icon {
+    width: 32px; height: 32px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step-done .step-icon { background: #d4edda; color: #28a745; }
+  .step-active .step-icon { background: #e74c3c; color: #fff; }
+  .step-wait .step-icon { background: #eee; color: #999; }
+  .step-name { font-size: 14px; font-weight: 500; flex: 1; }
+  .step-status { font-size: 12px; color: #999; }
+  .step-done .step-status { color: #28a745; }
+  .step-active .step-status { color: #e74c3c; font-weight: 600; }
+  .step-active { background: #fef9f9; }
+  .elapsed { font-size: 12px; color: #aaa; text-align: right; margin-top: 12px; }
+
+  /* 리포트: 이상 요약 카드 3개 */
+  .anomaly-cards { display: flex; gap: 12px; margin-bottom: 24px; }
+  .anomaly-card {
+    flex: 1; padding: 16px; border: 1.5px solid #e0e0e0; border-radius: 8px;
+    background: #fafafa;
+  }
+  .anomaly-card.active { border-color: #e74c3c; background: #fef7f7; }
+  .anomaly-metric { font-size: 13px; font-weight: 600; color: #555; }
+  .anomaly-change { font-size: 24px; font-weight: 700; color: #e74c3c; margin: 4px 0; }
+  .anomaly-severity {
+    display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .severity-high { background: #fce4e4; color: #c0392b; }
+  .severity-medium { background: #fef3cd; color: #856404; }
+
+  /* 리포트: 상세 카드 */
+  .detail-section { margin-bottom: 16px; }
+  .detail-card {
+    border: 1.5px solid #e0e0e0; border-radius: 8px; overflow: hidden;
+  }
+  .detail-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: #f8f8f8; cursor: pointer;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  .detail-header-title { font-size: 14px; font-weight: 600; }
+  .detail-header-agent { font-size: 11px; color: #999; }
+  .detail-body { padding: 16px; }
+
+  /* 이상 지표 요약 카드 내부 — 라벨/값 세로 분리 */
+  .kpi-row { padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+  .kpi-row:last-child { border-bottom: none; }
+  .kpi-label { font-size: 12px; color: #999; margin-bottom: 3px; }
+  .kpi-value { font-size: 13px; font-weight: 600; line-height: 1.5; }
+
+  /* 세그먼트 바 차트 */
+  .seg-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .seg-label { width: 80px; font-size: 12px; color: #666; text-align: right; }
+  .seg-bar-bg { flex: 1; height: 20px; background: #eee; border-radius: 4px; position: relative; }
+  .seg-bar {
+    height: 100%; border-radius: 4px; position: absolute; top: 0; left: 0;
+  }
+  .seg-bar.negative { background: #f5a5a5; }
+  .seg-bar.positive { background: #a5d6a7; }
+  .seg-value { width: 50px; font-size: 12px; font-weight: 600; }
+  .seg-value.neg { color: #e74c3c; }
+  .seg-value.pos { color: #28a745; }
+
+  /* 가설 리스트 — 배지와 내용 분리 */
+  .hypo-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 0; border-bottom: 1px solid #f0f0f0;
+  }
+  .hypo-item:last-child { border-bottom: none; }
+  .badge {
+    font-size: 11px; font-weight: 600; padding: 4px 0;
+    border-radius: 4px; flex-shrink: 0; min-width: 56px; text-align: center;
+    margin-top: 1px;
+  }
+  .badge-supported { background: #d4edda; color: #155724; }
+  .badge-rejected { background: #f8d7da; color: #721c24; }
+  .badge-unverified { background: #e2e3e5; color: #383d41; }
+  .hypo-content { flex: 1; }
+  .hypo-text { font-size: 13px; font-weight: 500; }
+  .hypo-evidence { font-size: 11px; color: #888; margin-top: 4px; line-height: 1.4; }
+  .hypo-evidence.supported-ev { color: #555; }
+
+  /* 인과 체인 */
+  .chain { display: flex; flex-direction: column; gap: 0; }
+  .chain-step {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 12px 0;
+  }
+  .chain-num {
+    width: 24px; height: 24px; border-radius: 50%; background: #e74c3c;
+    color: #fff; font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .chain-arrow {
+    width: 24px; text-align: center; color: #ccc; font-size: 16px;
+    flex-shrink: 0; padding: 0 0 0 0;
+  }
+  .chain-content { flex: 1; }
+  .chain-text { font-size: 13px; font-weight: 500; }
+  .chain-ev { font-size: 11px; color: #888; margin-top: 2px; }
+  .chain-summary {
+    margin-top: 12px; padding: 12px; background: #fef7f7;
+    border-radius: 6px; font-size: 13px; color: #c0392b; font-weight: 500;
+    border-left: 3px solid #e74c3c;
+  }
+
+  /* 액션 리스트 */
+  .action-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 12px 0; border-bottom: 1px solid #f0f0f0;
+  }
+  .action-item:last-child { border-bottom: none; }
+  .action-priority {
+    font-size: 11px; font-weight: 700; padding: 3px 8px;
+    border-radius: 4px; flex-shrink: 0; min-width: 60px; text-align: center;
+  }
+  .priority-critical { background: #e74c3c; color: #fff; }
+  .priority-high { background: #fef3cd; color: #856404; }
+  .priority-medium { background: #e2e3e5; color: #555; }
+  .action-content { flex: 1; }
+  .action-title { font-size: 13px; font-weight: 600; }
+  .action-meta { font-size: 11px; color: #888; margin-top: 2px; }
+
+  /* 추가 검토 박스 */
+  .additional-box {
+    margin-top: 12px; padding: 12px; background: #f8f9fa;
+    border: 1px dashed #ccc; border-radius: 6px;
+  }
+  .additional-title { font-size: 12px; font-weight: 600; color: #666; margin-bottom: 6px; }
+  .additional-item { font-size: 12px; color: #888; padding: 2px 0; }
+</style>
+</head>
+<body>
+
+<!-- ==================== 화면 1: 시작 ==================== -->
+<div class="screen">
+  <div class="screen-label">화면 1 — 시작</div>
+  <div class="screen-body">
+    <h1>DataPilot</h1>
+    <p class="subtitle">운영 지표에서 병목을 찾고, 원인을 분석하고, 액션을 제안합니다.</p>
+
+    <hr class="divider">
+
+    <div class="form-group">
+      <label class="form-label">게임 선택</label>
+      <div class="select-mock">Pizza Ready</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">분석 기간</label>
+      <div class="radio-group">
+        <div class="radio-item">최근 7일</div>
+        <div class="radio-item">최근 14일</div>
+        <div class="radio-item selected">최근 30일</div>
+      </div>
+    </div>
+
+    <button class="btn-primary">분석 시작</button>
+  </div>
+</div>
+
+<!-- ==================== 화면 2: 분석 진행 ==================== -->
+<div class="screen">
+  <div class="screen-label">화면 2 — 분석 진행</div>
+  <div class="screen-body">
+    <h2>Pizza Ready (최근 30일) 분석 중...</h2>
+
+    <div class="progress-steps">
+      <div class="step step-done">
+        <div class="step-icon">1</div>
+        <div class="step-name">병목 감지</div>
+        <div class="step-status">완료 — 이상 지표 3개 발견</div>
+      </div>
+      <div class="step step-active">
+        <div class="step-icon">2</div>
+        <div class="step-name">세그먼트 분석</div>
+        <div class="step-status">분석 중...</div>
+      </div>
+      <div class="step step-wait">
+        <div class="step-icon">3</div>
+        <div class="step-name">가설 생성</div>
+        <div class="step-status">대기</div>
+      </div>
+      <div class="step step-wait">
+        <div class="step-icon">4</div>
+        <div class="step-name">데이터 검증</div>
+        <div class="step-status">대기</div>
+      </div>
+      <div class="step step-wait">
+        <div class="step-icon">5</div>
+        <div class="step-name">원인 추론</div>
+        <div class="step-status">대기</div>
+      </div>
+      <div class="step step-wait">
+        <div class="step-icon">6</div>
+        <div class="step-name">액션 추천</div>
+        <div class="step-status">대기</div>
+      </div>
+    </div>
+
+    <p class="elapsed">경과 시간: 1분 23초</p>
+  </div>
+</div>
+
+<!-- ==================== 화면 3: 리포트 ==================== -->
+<div class="screen">
+  <div class="screen-label">화면 3 — 리포트</div>
+  <div class="screen-body">
+    <h2>분석 완료 — Pizza Ready (최근 30일)</h2>
+
+    <!-- 이상 지표 요약 카드 3개 -->
+    <div class="anomaly-cards">
+      <div class="anomaly-card active">
+        <div class="anomaly-metric">인앱결제 매출</div>
+        <div class="anomaly-change">-11%</div>
+        <span class="anomaly-severity severity-high">HIGH</span>
+      </div>
+      <div class="anomaly-card">
+        <div class="anomaly-metric">D7 리텐션</div>
+        <div class="anomaly-change">28% → 24%</div>
+        <span class="anomaly-severity severity-high">HIGH</span>
+      </div>
+      <div class="anomaly-card">
+        <div class="anomaly-metric">결제 성공률</div>
+        <div class="anomaly-change">98% → 92%</div>
+        <span class="anomaly-severity severity-medium">MEDIUM</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ── 카드 1: 이상 요약 ── -->
+    <div class="detail-section">
+      <div class="detail-card">
+        <div class="detail-header">
+          <span class="detail-header-title">이상 지표 요약</span>
+          <span class="detail-header-agent">① 병목 감지</span>
+        </div>
+        <div class="detail-body">
+          <div class="kpi-row">
+            <div class="kpi-label">지표</div>
+            <div class="kpi-value">인앱결제 매출 (revenue)</div>
+          </div>
+          <div class="kpi-row">
+            <div class="kpi-label">변화율</div>
+            <div class="kpi-value" style="color:#e74c3c">-11.1% (직전 4일 평균 ₩351,200 → 최근 4일 평균 ₩312,400)</div>
+          </div>
+          <div class="kpi-row">
+            <div class="kpi-label">심각도</div>
+            <div class="kpi-value">HIGH</div>
+          </div>
+          <div class="kpi-row">
+            <div class="kpi-label">판정 근거</div>
+            <div class="kpi-value" style="font-weight:400">D-3(3/28) Android 배포 이후 매출이 지속 하락. 정상 변동 범위(±5%)를 초과하며 4일 연속 하향 추세. 같은 기간 DAU·세션 수는 정상 → 유저 감소가 아닌 결제 단가 문제로 추정.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 카드 2: 세그먼트 분해 ── -->
+    <div class="detail-section">
+      <div class="detail-card">
+        <div class="detail-header">
+          <span class="detail-header-title">세그먼트 분해</span>
+          <span class="detail-header-agent">② 세그먼트 분석</span>
+        </div>
+        <div class="detail-body">
+          <h3 style="color:#e74c3c; margin-bottom:12px;">매출 감소가 Android에 집중 (-18%, iOS는 +0.2%로 정상)</h3>
+
+          <div style="font-size:12px; color:#888; margin-bottom:8px;">platform별 매출 변화율</div>
+          <div class="seg-row">
+            <div class="seg-label">Android</div>
+            <div class="seg-bar-bg"><div class="seg-bar negative" style="width:75%"></div></div>
+            <div class="seg-value neg">-18%</div>
+          </div>
+          <div class="seg-row">
+            <div class="seg-label">iOS</div>
+            <div class="seg-bar-bg"><div class="seg-bar positive" style="width:6%"></div></div>
+            <div class="seg-value pos">+0.2%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 카드 3: 가설과 검증 ── -->
+    <div class="detail-section">
+      <div class="detail-card">
+        <div class="detail-header">
+          <span class="detail-header-title">가설과 검증</span>
+          <span class="detail-header-agent">③ 가설 생성 + ④ 데이터 검증</span>
+        </div>
+        <div class="detail-body">
+          <div class="hypo-item">
+            <span class="badge badge-supported">확인됨</span>
+            <div class="hypo-content">
+              <div class="hypo-text">Android 상점 UI 변경으로 프리미엄 패키지 노출 감소</div>
+              <div class="hypo-evidence supported-ev">releases: D-3 Android v1.2.3 배포, shop_impressions: premium 노출 감소 확인</div>
+            </div>
+          </div>
+          <div class="hypo-item">
+            <span class="badge badge-rejected">기각됨</span>
+            <div class="hypo-content">
+              <div class="hypo-text">Google Play 결제 모듈 장애</div>
+              <div class="hypo-evidence">payment_errors: Android 결제 에러 변화 없음</div>
+            </div>
+          </div>
+          <div class="hypo-item">
+            <span class="badge badge-unverified">미검증</span>
+            <div class="hypo-content">
+              <div class="hypo-text">Android 앱 크래시율 증가</div>
+              <div class="hypo-evidence">필요 데이터: Android 크래시 로그 (가용 테이블 외)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 카드 4: 근본 원인 ── -->
+    <div class="detail-section">
+      <div class="detail-card">
+        <div class="detail-header">
+          <span class="detail-header-title">근본 원인</span>
+          <span class="detail-header-agent">⑤ 원인 추론</span>
+        </div>
+        <div class="detail-body">
+          <div class="chain">
+            <div class="chain-step">
+              <div class="chain-num">1</div>
+              <div class="chain-content">
+                <div class="chain-text">D-3 Android 배포 (v1.2.3) — 상점 UI 진열 순서 변경</div>
+                <div class="chain-ev">근거: releases 테이블 — "Shop UI refresh (featured slot reordering)"</div>
+              </div>
+            </div>
+            <div style="padding-left:8px"><div class="chain-arrow">↓</div></div>
+            <div class="chain-step">
+              <div class="chain-num">2</div>
+              <div class="chain-content">
+                <div class="chain-text">프리미엄 패키지 노출 감소 (slot 1~3 → 4~6, 스크롤 깊이 밖으로 밀림)</div>
+                <div class="chain-ev">근거: shop_impressions — Android premium 노출 수 D-3 전후 비교</div>
+              </div>
+            </div>
+            <div style="padding-left:8px"><div class="chain-arrow">↓</div></div>
+            <div class="chain-step">
+              <div class="chain-num">3</div>
+              <div class="chain-content">
+                <div class="chain-text">Android 매출 -18% → 전사 매출 -11%</div>
+                <div class="chain-ev">근거: payments — Android 프리미엄 결제 건수 비례 감소</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="chain-summary">
+            <strong>결론:</strong> Android 배포의 UI 변경이 프리미엄 상품 노출을 줄여 전사 매출 감소로 이어짐
+          </div>
+
+          <div class="additional-box">
+            <div class="additional-title">추가 검토 필요</div>
+            <div class="additional-item">- Android 크래시율 증가 여부 (크래시 로그 필요)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 카드 5: 추천 액션 ── -->
+    <div class="detail-section">
+      <div class="detail-card">
+        <div class="detail-header">
+          <span class="detail-header-title">추천 액션</span>
+          <span class="detail-header-agent">⑥ 액션 추천</span>
+        </div>
+        <div class="detail-body">
+          <div class="action-item">
+            <span class="action-priority priority-critical">긴급</span>
+            <div class="action-content">
+              <div class="action-title">Android 핫픽스로 상점 진열 순서 롤백</div>
+              <div class="action-meta">효과: 매출 회복</div>
+              <div class="action-meta">리소스: Android 개발자 1명, 2일</div>
+            </div>
+          </div>
+          <div class="action-item">
+            <span class="action-priority priority-high">단기</span>
+            <div class="action-content">
+              <div class="action-title">프리미엄 패키지 메인 화면 배너 노출</div>
+              <div class="action-meta">효과: 롤백 전 임시 노출 보강</div>
+              <div class="action-meta">리소스: 1일</div>
+            </div>
+          </div>
+          <div class="action-item">
+            <span class="action-priority priority-medium">중기</span>
+            <div class="action-content">
+              <div class="action-title">상점 UI 변경 시 A/B 테스트 프로세스 의무화</div>
+              <div class="action-meta">효과: 재발 방지</div>
+              <div class="action-meta">리소스: 프로세스 정립 1주</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
