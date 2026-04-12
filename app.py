@@ -268,21 +268,59 @@ def page_running() -> None:
 # ------------------------------------------------------------------
 
 
-def _build_tab_data(report: PipelineReport) -> tuple[list[str], dict]:
-    """anomaly_order 기준으로 탭 이름 + 데이터 매핑을 생성한다."""
+def _build_card_data(report: PipelineReport) -> list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]]:
+    """anomaly_order 기준으로 (metric, data) 리스트를 생성한다."""
     analyzed_map = {a.anomaly.metric: a for a in report.analyzed}
     unanalyzed_map = {u.anomaly.metric: u for u in report.unanalyzed}
 
-    tab_names: list[str] = []
-    tab_data: dict = {}
+    items: list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]] = []
     for metric in report.anomaly_order:
         if metric in analyzed_map:
-            tab_names.append(analyzed_map[metric].anomaly.metric_label)
-            tab_data[metric] = analyzed_map[metric]
+            items.append((metric, analyzed_map[metric]))
         elif metric in unanalyzed_map:
-            tab_names.append(unanalyzed_map[metric].anomaly.metric_label)
-            tab_data[metric] = unanalyzed_map[metric]
-    return tab_names, tab_data
+            items.append((metric, unanalyzed_map[metric]))
+    return items
+
+
+def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]], selected_idx: int) -> None:
+    """상단 이상 요약 카드 행 (와이어프레임: 가로 카드 + 클릭 선택)."""
+    cols = st.columns(len(items))
+    for idx, (col, (metric, data)) in enumerate(zip(cols, items)):
+        with col:
+            anomaly = data.anomaly
+            is_selected = idx == selected_idx
+            is_nonseg = isinstance(data, UnanalyzedAnomaly)
+
+            # 선택 상태별 스타일
+            if is_selected and is_nonseg:
+                border, bg = "#999", "#f8f8f8"
+            elif is_selected:
+                border, bg = "#e74c3c", "#fef7f7"
+            else:
+                border, bg = "#e0e0e0", "#fafafa"
+
+            sev_bg, sev_fg = _SEVERITY_COLORS.get(anomaly.severity, ("#e2e3e5", "#383d41"))
+
+            st.markdown(
+                f"<div style='border:1.5px solid {border};background:{bg};padding:16px;"
+                f"border-radius:8px;text-align:left;min-height:100px;'>"
+                f"<div style='font-size:13px;font-weight:600;color:#555;'>{anomaly.metric_label}</div>"
+                f"<div style='font-size:20px;font-weight:700;color:#e74c3c;margin:4px 0;'>"
+                f"{anomaly.change_display}</div>"
+                f"<span style='background:{sev_bg};color:{sev_fg};padding:2px 8px;"
+                f"border-radius:4px;font-size:11px;font-weight:600;'>{anomaly.severity}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            if st.button(
+                anomaly.metric_label,
+                key=f"card_{idx}",
+                use_container_width=True,
+                type="primary" if is_selected else "secondary",
+            ):
+                st.session_state.selected_anomaly_idx = idx
+                st.rerun()
 
 
 def page_report() -> None:
@@ -299,19 +337,29 @@ def page_report() -> None:
             st.rerun()
         return
 
-    tab_names, tab_data = _build_tab_data(report)
-    tabs = st.tabs(tab_names)
-    for tab, metric in zip(tabs, report.anomaly_order):
-        with tab:
-            data = tab_data.get(metric)
-            if isinstance(data, AnomalyAnalysis):
-                _render_analyzed(data)
-            elif isinstance(data, UnanalyzedAnomaly):
-                _render_unanalyzed(data)
+    items = _build_card_data(report)
+
+    # 선택 상태 초기화
+    if "selected_anomaly_idx" not in st.session_state:
+        st.session_state.selected_anomaly_idx = 0
+    selected_idx = st.session_state.selected_anomaly_idx
+
+    # 상단 카드 행
+    _render_anomaly_cards(items, selected_idx)
+
+    st.divider()
+
+    # 선택된 카드의 상세 렌더링
+    _, selected_data = items[selected_idx]
+    if isinstance(selected_data, AnomalyAnalysis):
+        _render_analyzed(selected_data)
+    elif isinstance(selected_data, UnanalyzedAnomaly):
+        _render_unanalyzed(selected_data)
 
     st.divider()
     if st.button("새 분석 시작", type="primary", use_container_width=True):
         st.session_state.page = "start"
+        st.session_state.pop("selected_anomaly_idx", None)
         st.rerun()
 
 
