@@ -13,12 +13,20 @@ python-dotenv가 프로젝트 루트의 `.env` 파일을 읽어
 from __future__ import annotations
 
 import os
+import warnings
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
+
+if not ANTHROPIC_API_KEY:
+    warnings.warn(
+        "ANTHROPIC_API_KEY가 설정되지 않았습니다. "
+        "LLM 호출이 실패합니다. .env 파일을 확인하세요.",
+        stacklevel=2,
+    )
 
 # ──────────────────────────────────────────────────────────────────
 # 에이전트별 모델 배정

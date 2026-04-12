@@ -47,7 +47,8 @@ from datapilot.repository.port import GameDataRepository
 MAX_TOOL_ROUNDS = 5
 
 _DANGEROUS_PATTERN = re.compile(
-    r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE)\b",
+    r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE"
+    r"|ATTACH|DETACH|COPY|EXPORT|IMPORT|LOAD|INSTALL|CALL|PRAGMA)\b",
     re.IGNORECASE,
 )
 
@@ -116,11 +117,26 @@ def classify(
 def _extract_table_names(sql: str) -> set[str]:
     """SQL에서 FROM/JOIN 뒤에 오는 테이블명을 추출한다.
 
-    간이 정규식 기반이며 CTE·서브쿼리를 완벽히 처리하지는 못한다.
-    읽기 전용 연결이 최종 방어선이므로 프로토타입에서는 충분하다.
+    따옴표/백틱으로 감싼 식별자도 추출하고,
+    CTE alias(WITH ... AS)는 실제 테이블이 아니므로 제외한다.
+    간이 정규식 기반이며 읽기 전용 연결이 최종 방어선이다.
     """
-    pattern = re.compile(r"\b(?:FROM|JOIN)\s+(\w+)", re.IGNORECASE)
-    return set(pattern.findall(sql))
+    # CTE alias 추출 (실제 테이블이 아님)
+    cte_pattern = re.compile(r"\bWITH\s+(\w+)\s+AS\s*\(", re.IGNORECASE)
+    cte_aliases = set(cte_pattern.findall(sql))
+
+    # FROM/JOIN 뒤 테이블명 추출 (따옴표/백틱 포함)
+    table_pattern = re.compile(
+        r'\b(?:FROM|JOIN)\s+(?:"([^"]+)"|`([^`]+)`|(\w+))',
+        re.IGNORECASE,
+    )
+    names: set[str] = set()
+    for match in table_pattern.finditer(sql):
+        name = match.group(1) or match.group(2) or match.group(3)
+        if name:
+            names.add(name)
+
+    return names - cte_aliases
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -215,7 +231,8 @@ class DataValidator:
     def _build_tool(self):  # noqa: ANN202
         """execute_sql Tool을 생성한다. 4중 보안 적용."""
         repo = self._repo
-        validator = self  # _allowed_tables 동적 참조
+        # 클로저 캡처: validate() 호출 시 _allowed_tables가 동적 갱신됨
+        validator = self
 
         @tool
         def execute_sql(query: str) -> str:
@@ -232,6 +249,13 @@ class DataValidator:
                     ensure_ascii=False,
                 )
 
+            # 1-b) 세미콜론 다중 쿼리 차단
+            if ";" in stripped.rstrip(";").strip():
+                return json.dumps(
+                    {"error": "다중 쿼리(세미콜론)는 허용되지 않습니다"},
+                    ensure_ascii=False,
+                )
+
             # 2) 위험 키워드 블랙리스트
             if _DANGEROUS_PATTERN.search(query):
                 return json.dumps(
@@ -241,6 +265,11 @@ class DataValidator:
 
             # 3) 테이블 화이트리스트
             tables = _extract_table_names(query)
+            if not tables:
+                return json.dumps(
+                    {"error": "테이블명을 추출할 수 없는 쿼리입니다"},
+                    ensure_ascii=False,
+                )
             disallowed = tables - validator._allowed_tables
             if disallowed:
                 return json.dumps(
@@ -252,8 +281,12 @@ class DataValidator:
             try:
                 rows = repo.execute_readonly_sql(query, max_rows=100)
                 return json.dumps(rows, default=str, ensure_ascii=False)
-            except RuntimeError as e:
-                return json.dumps({"error": str(e)}, ensure_ascii=False)
+            except RuntimeError:
+                # DB 내부 정보(경로, 스키마 등) 노출 방지
+                return json.dumps(
+                    {"error": "쿼리 실행 중 오류가 발생했습니다"},
+                    ensure_ascii=False,
+                )
 
         return execute_sql
 
@@ -314,6 +347,7 @@ class DataValidator:
 
         queries_run: list[str] = []
         query_results: list[Any] = []
+        response = None  # 방어적 초기화
 
         # 에이전트 루프: LLM이 execute_sql을 호출할 때마다 실행
         for _ in range(MAX_TOOL_ROUNDS):
@@ -327,10 +361,23 @@ class DataValidator:
                 sql = tc["args"].get("query", "")
                 queries_run.append(sql)
                 result_str = self._execute_sql_tool.invoke(tc["args"])
-                query_results.append(json.loads(result_str))
+                try:
+                    query_results.append(json.loads(result_str))
+                except json.JSONDecodeError:
+                    query_results.append({"raw": result_str})
                 messages.append(
                     ToolMessage(content=result_str, tool_call_id=tc["id"]),
                 )
+
+        # 라운드 소진: LLM이 MAX_TOOL_ROUNDS 후에도 tool 호출을 시도한 경우
+        if response and response.tool_calls:
+            return ValidationResult(
+                hypothesis=hypothesis.hypothesis,
+                status="unverified",
+                evidence="검증 라운드 초과 (MAX_TOOL_ROUNDS)",
+                queries_run=queries_run,
+                query_results=query_results,
+            )
 
         # 판정 추출: 에이전트 루프 종료 후 별도 structured output 호출
         analysis_text = response.content if response else ""
