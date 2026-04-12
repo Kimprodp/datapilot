@@ -162,13 +162,53 @@ def _render_anomaly_summary(anomaly_item) -> None:
 def page_start() -> None:
     _app_header()
 
-    game = st.selectbox("게임 선택", ["Pizza Ready"], index=0)
-    period_label = st.radio(
+    # 게임 선택
+    st.markdown(
+        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>게임 선택</div>",
+        unsafe_allow_html=True,
+    )
+    game = st.selectbox("게임 선택", ["Pizza Ready"], index=0, label_visibility="collapsed")
+
+    # 화면1 공통 CSS
+    st.markdown("""<style>
+        /* 분석 기간 pill 버튼 */
+        button[data-testid*='pill'] {
+            border-radius: 6px !important;
+            min-height: 48px !important;
+            padding: 0 28px !important;
+            font-size: 14px !important;
+            margin-left: 4px !important;
+            margin-right: 4px !important;
+        }
+        /* 분석 기간 라벨 */
+        div[data-testid='stButtonGroup'] label[data-testid='stWidgetLabel'] p {
+            font-size: 14px !important;
+            font-weight: 600 !important;
+        }
+        /* 게임 선택 드롭다운 */
+        [data-baseweb='select'] > div {
+            min-height: 48px !important;
+            display: flex !important;
+            align-items: center !important;
+        }
+        /* 분석 시작 버튼 */
+        button[data-testid='stBaseButton-primary'] {
+            min-height: 52px !important;
+            font-size: 15px !important;
+        }
+    </style>""", unsafe_allow_html=True)
+
+    # 분석 기간
+    period_label = st.pills(
         "분석 기간",
         list(_PERIOD_OPTIONS.keys()),
-        index=2,
-        horizontal=True,
+        default="최근 30일",
     )
+    if period_label is None:
+        period_label = "최근 30일"
+
+    # 분석 기간 ↔ 분석 시작 사이 여백
+    st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
 
     if st.button("분석 시작", type="primary", use_container_width=True):
         days = _PERIOD_OPTIONS[period_label]
@@ -311,18 +351,19 @@ def _korean_label(metric_label: str) -> str:
 
 
 def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]], selected_idx: int) -> None:
-    """상단 이상 요약 카드 행 (와이어프레임: 가로 카드 + 클릭 선택)."""
-    # 카드 선택 버튼을 카드 하단에 자연스럽게 붙이는 CSS
+    """상단 이상 요약 카드 행 (와이어프레임: 가로 카드 + 클릭 선택).
+
+    카드 HTML 위에 투명 버튼을 겹쳐서 카드 자체를 클릭 가능하게 만든다.
+    """
+    # 투명 버튼을 카드 위로 겹치는 CSS
     st.markdown(
         "<style>"
-        "div[data-testid='column'] div.card-btn .stButton > button {"
-        "  border:none !important; background:transparent !important;"
-        "  color:#999 !important; font-size:11px !important;"
-        "  padding:2px 0 !important; margin-top:-8px !important;"
-        "  text-decoration:underline !important;"
+        "div[data-testid='column'] .card-overlay {"
+        "  position:relative; margin-top:-90px; height:86px; z-index:1;"
         "}"
-        "div[data-testid='column'] div.card-btn .stButton > button:hover {"
-        "  color:#e74c3c !important;"
+        "div[data-testid='column'] .card-overlay .stButton > button {"
+        "  opacity:0 !important; width:100% !important; height:86px !important;"
+        "  cursor:pointer !important; border:none !important;"
         "}"
         "</style>",
         unsafe_allow_html=True,
@@ -349,7 +390,7 @@ def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAno
 
             st.markdown(
                 f"<div style='border:1.5px solid {border};background:{bg};padding:12px;"
-                f"border-radius:8px;text-align:left;min-height:80px;'>"
+                f"border-radius:8px;text-align:left;min-height:80px;cursor:pointer;'>"
                 f"<div style='font-size:12px;font-weight:600;color:#555;'>{korean_name}</div>"
                 f"<div style='font-size:16px;font-weight:700;color:#e74c3c;margin:4px 0;'>"
                 f"{change_text}</div>"
@@ -359,16 +400,12 @@ def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAno
                 unsafe_allow_html=True,
             )
 
-            if not is_selected:
-                st.markdown('<div class="card-btn">', unsafe_allow_html=True)
-                if st.button(
-                    "선택",
-                    key=f"card_{idx}",
-                    use_container_width=True,
-                ):
-                    st.session_state.selected_anomaly_idx = idx
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
+            # 투명 버튼을 카드 위에 겹침 (클릭 핸들러)
+            st.markdown('<div class="card-overlay">', unsafe_allow_html=True)
+            if st.button(" ", key=f"card_{idx}", use_container_width=True):
+                st.session_state.selected_anomaly_idx = idx
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 def page_report() -> None:
@@ -405,20 +442,22 @@ def page_report() -> None:
         _render_unanalyzed(selected_data)
 
     st.divider()
-    # 새 분석 시작 버튼 (세로 높이 확대)
+    # 새 분석 시작 버튼 (세로 높이 확대 — start-btn CSS 재사용)
     st.markdown(
         "<style>"
-        "div[data-testid='stButton'] > button[kind='primary'] {"
+        ".start-btn .stButton > button[kind='primary'] {"
         "  padding-top:16px !important; padding-bottom:16px !important;"
         "  font-size:16px !important;"
         "}"
         "</style>",
         unsafe_allow_html=True,
     )
+    st.markdown('<div class="start-btn">', unsafe_allow_html=True)
     if st.button("새 분석 시작", type="primary", use_container_width=True):
         st.session_state.page = "start"
         st.session_state.pop("selected_anomaly_idx", None)
         st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
