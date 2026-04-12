@@ -112,6 +112,7 @@ class DuckDBAdapter(GameDataRepository):
     ) -> dict[str, Any]:
         start, end = period
         _validate_period(start, end)
+        # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 WHERE game_id = ? 추가.
         rows = self._conn.execute(
             """
             SELECT
@@ -154,6 +155,7 @@ class DuckDBAdapter(GameDataRepository):
     # ──────────────────────────────────────────────────────────
 
     def get_available_dimensions(self, game_id: str) -> list[str]:
+        # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 dataset 기준 필터 추가.
         rows = self._conn.execute(
             """
             SELECT column_name
@@ -291,6 +293,7 @@ class DuckDBAdapter(GameDataRepository):
     # ──────────────────────────────────────────────────────────
 
     def get_available_schema(self, game_id: str) -> dict[str, Any]:
+        # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 dataset 기준 필터 추가.
         rows = self._conn.execute(
             """
             SELECT table_name, column_name
