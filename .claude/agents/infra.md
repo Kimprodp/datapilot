@@ -222,8 +222,6 @@ elif ENV == "cloud":
 - 과제 프로토타입 규모이므로 Docker, CI/CD 등은 도입하지 않는다.
 
 ## 참조 문서
-
-- 노션 기획 문서: `과제 전형 — DataPilot` (페이지 ID: `33cbe1fa-f602-815d-b52f-e00de97f6548`)
 - 상세 기획 문서: `docs/datapilot-planning.md`
 - Streamlit Community Cloud: https://streamlit.io/cloud
 - uv 공식: https://docs.astral.sh/uv/

@@ -128,6 +128,4 @@ CTO/시니어 개발자 관점의 코드 리뷰어. "돌아가는가?"가 아니
 ```
 
 ## 참조 문서
-
-- 노션 기획 문서: `과제 전형 — DataPilot` (페이지 ID: `33cbe1fa-f602-815d-b52f-e00de97f6548`)
 - 상세 기획 문서: `docs/datapilot-planning.md`

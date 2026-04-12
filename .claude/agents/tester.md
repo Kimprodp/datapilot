@@ -148,6 +148,4 @@ def mock_repository(mock_duckdb):
 - 테스트 실행 결과 보고 (통과율, 커버리지)
 
 ## 참조 문서
-
-- 노션 기획 문서: `과제 전형 — DataPilot` (페이지 ID: `33cbe1fa-f602-815d-b52f-e00de97f6548`)
 - 상세 기획 문서: `docs/datapilot-planning.md`

@@ -212,5 +212,8 @@ __marimo__/
 # Claude Code 로컬 설정
 .claude/settings.local.json
 
+# 생성된 DB 파일 (스크립트로 재생성)
+data/*.db
+
 # 내부 기획 문서 (Public 레포에 노출 X)
 docs/datapilot-planning.md
