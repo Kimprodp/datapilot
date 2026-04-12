@@ -36,7 +36,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from datapilot.agents.hypothesis_generator import Hypothesis, HypothesisList
-from datapilot.config import ANTHROPIC_API_KEY, SONNET_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -211,6 +211,7 @@ class DataValidator:
         base_llm = llm or ChatAnthropic(
             model=SONNET_MODEL,
             api_key=ANTHROPIC_API_KEY,
+            max_tokens=MAX_TOKENS,
         )
 
         # 동적으로 갱신되는 화이트리스트 (validate 호출 시 설정)

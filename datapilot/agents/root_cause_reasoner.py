@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.data_validator import ValidationResult
 from datapilot.agents.segmentation_analyzer import SegmentationReport
-from datapilot.config import ANTHROPIC_API_KEY, OPUS_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -166,6 +166,7 @@ class RootCauseReasoner:
             llm = ChatAnthropic(
                 model=OPUS_MODEL,
                 api_key=ANTHROPIC_API_KEY,
+                max_tokens=MAX_TOKENS,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

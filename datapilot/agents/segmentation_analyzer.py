@@ -29,7 +29,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
-from datapilot.config import ANTHROPIC_API_KEY, SONNET_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -120,6 +120,7 @@ class SegmentationAnalyzer:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
+                max_tokens=MAX_TOKENS,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
