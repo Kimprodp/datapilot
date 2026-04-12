@@ -166,12 +166,48 @@ def page_start() -> None:
 
 
 def _render_step(container, num: int, agent: str, status: str, summary: str) -> None:
+    """화면2 진행 스텝 1행. 와이어프레임 일치: 번호 원 + 이름 + 상태 텍스트."""
     name = _AGENT_NAMES.get(agent, agent)
-    icons = {"done": "✅", "active": "🔴", "error": "❌"}
-    icon = icons.get(status, "⬜")
-    labels = {"done": f"완료: {summary}", "active": "분석 중...", "error": f"실패: {summary}"}
-    status_text = labels.get(status, "대기")
-    container.markdown(f"{icon} **{num}. {name}** — {status_text}")
+
+    # 상태별 스타일
+    styles = {
+        "done":   {"bg": "#d4edda", "fg": "#28a745", "icon": str(num), "status_fg": "#28a745", "row_bg": "#fff"},
+        "active": {"bg": "#e74c3c", "fg": "#fff",    "icon": str(num), "status_fg": "#e74c3c", "row_bg": "#fef9f9"},
+        "error":  {"bg": "#e74c3c", "fg": "#fff",    "icon": "✕",      "status_fg": "#e74c3c", "row_bg": "#fef2f2"},
+        "wait":   {"bg": "#eee",    "fg": "#999",    "icon": str(num), "status_fg": "#999",    "row_bg": "#fff"},
+    }
+    s = styles.get(status, styles["wait"])
+
+    # 상태 텍스트
+    status_labels = {
+        "done": f"완료 — {summary}",
+        "active": "분석 중...",
+        "error": f"실패 — {summary}",
+        "wait": "대기",
+    }
+    status_text = status_labels.get(status, "대기")
+
+    # 이름 스타일
+    name_style = "font-weight:600;color:#e74c3c;" if status == "error" else "font-weight:500;"
+    status_weight = "font-weight:600;" if status in ("active", "error") else ""
+
+    row_bg = s["row_bg"]
+    icon_bg = s["bg"]
+    icon_fg = s["fg"]
+    icon_text = s["icon"]
+    st_fg = s["status_fg"]
+
+    container.markdown(
+        f"<div style='display:flex;align-items:center;gap:12px;padding:14px 16px;"
+        f"border-bottom:1px solid #f0f0f0;background:{row_bg};'>"
+        f"<div style='width:32px;height:32px;border-radius:50%;background:{icon_bg};color:{icon_fg};"
+        f"display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;"
+        f"flex-shrink:0;'>{icon_text}</div>"
+        f"<div style='flex:1;font-size:14px;{name_style}'>{name}</div>"
+        f"<div style='font-size:12px;color:{st_fg};{status_weight}'>{status_text}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def page_running() -> None:
