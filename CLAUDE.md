@@ -37,7 +37,9 @@ DataPilot은 게임 PM용 멀티 에이전트 KPI 진단 코파일럿이다.
 ### Git 워크플로우
 
 - **push는 사용자만 수동으로**. 에이전트 절대 push 금지.
-- 작업 단위로 커밋, 메시지는 사용자 승인 후 실행
+- 커밋 메시지 작성 전 반드시 `git status` + `git diff --stat`으로 워크트리 확인
+- 작업분이 많으면 논리 단위로 커밋 분리 (예: 구현(작업량이 많으면, 작업 단위별) / 테스트 / 리뷰 반영)
+- 메시지는 사용자 승인 후 실행
 
 ### 작성 원칙
 
@@ -78,8 +80,9 @@ DataPilot은 게임 PM용 멀티 에이전트 KPI 진단 코파일럿이다.
      - 시크릿 / 환경변수 로딩
      - 사용자 입력 파싱
 4. 리뷰/보안 피드백 Critical·Warning 반영
-5. 커밋
-6. `datapilot-planning.md` Phase 체크박스 업데이트
+5. `docs/review-log.md` 동기화 — 현재 리뷰 결과 기록 + 이전 ⏳ 항목 중 이번 Phase에서 해결된 건 상태 갱신
+6. 커밋
+7. `datapilot-planning.md` Phase 체크박스 업데이트
 
 Phase별 상세 작업 사이클은 `docs/datapilot-planning.md` 의 "진행 관리" 섹션 참조.
 

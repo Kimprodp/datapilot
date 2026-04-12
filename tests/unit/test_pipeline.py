@@ -882,19 +882,31 @@ class TestPipelineSchemaFetchedOnce:
         orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         mock_repo.get_available_schema.assert_called_once()
 
-    def test_schema_fetched_once_even_when_no_anomalies(self):
-        """이상 없어도 get_available_schema는 1회 호출된다.
+    def test_schema_not_fetched_when_no_anomalies(self):
+        """이상 없으면 get_available_schema를 호출하지 않는다.
 
-        (분류 단계 이후 스키마 조회는 anomalies 유무와 무관하게 항상 실행됨)
+        segmentable 이상이 없으면 스키마 조회 불필요 (DB I/O 절감).
         """
         anomaly_report = AnomalyReport(anomalies=[], normal=["revenue"])
         orchestrator, mock_repo = _make_orchestrator_with_mocks(anomaly_report)
         orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
-        mock_repo.get_available_schema.assert_called_once()
+        mock_repo.get_available_schema.assert_not_called()
+
+    def test_schema_not_fetched_when_all_non_segmentable(self):
+        """전부 non-segmentable이면 get_available_schema를 호출하지 않는다."""
+        anomaly_report = AnomalyReport(
+            anomalies=[_make_anomaly_item(metric="mau")],
+            normal=[],
+        )
+        orchestrator, mock_repo = _make_orchestrator_with_mocks(anomaly_report)
+        orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
+        mock_repo.get_available_schema.assert_not_called()
 
     def test_schema_fetch_called_with_game_id(self):
         """get_available_schema가 올바른 game_id로 호출된다."""
-        anomaly_report = AnomalyReport(anomalies=[], normal=[])
+        anomaly_report = AnomalyReport(
+            anomalies=[_make_anomaly_item(metric="revenue")], normal=[],
+        )
         orchestrator, mock_repo = _make_orchestrator_with_mocks(anomaly_report)
         orchestrator.run("my_game", _DEFAULT_PERIOD)
         mock_repo.get_available_schema.assert_called_once_with("my_game")

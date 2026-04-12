@@ -169,8 +169,10 @@ class PipelineOrchestrator:
         # ① 탐지 순서 보존 (UI 카드 정렬 기준)
         anomaly_order = [a.metric for a in anomaly_report.anomalies]
 
-        # 스키마는 한 번만 조회해 공유 (DB I/O 절감)
-        available_schema = self._repo.get_available_schema(game_id)
+        # 스키마는 segmentable이 있을 때만 1회 조회 (불필요한 DB I/O 방지)
+        available_schema = (
+            self._repo.get_available_schema(game_id) if segmentable else {}
+        )
 
         # ── 이상별 ②~⑥ 루프 ─────────────────────────────────
         analyzed: list[AnomalyAnalysis] = []
