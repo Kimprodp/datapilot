@@ -281,6 +281,38 @@ class TestGetMetricBySegments:
             assert result["metric"] == metric
             assert "platform" in result["segments"]
 
+    def test_ratio_metric_fills_missing_days_with_none(self, adapter):
+        """비율 지표(payment_success_rate)의 결측일은 0.0이 아니라 None이어야 한다.
+
+        payment_attempts 데이터가 없는 날짜에 0.0이 들어가면
+        LLM이 "결제 성공률 0%"로 오해해 환각을 일으킨다.
+        """
+        result = adapter.get_metric_by_segments(
+            GAME_ID, "payment_success_rate", (FULL_START, FULL_END), ["country"]
+        )
+        country_segs = result["segments"]["country"]
+        for country, values in country_segs.items():
+            for v in values:
+                # 값이 있으면 0~1 사이 float, 없으면 None이어야 함
+                assert v is None or (0.0 <= v <= 1.0), (
+                    f"{country}: 비율 지표에 범위 밖 값 {v}. "
+                    "결측이면 None, 있으면 0~1이어야 함"
+                )
+
+    def test_summation_metric_fills_missing_days_with_zero(self, adapter):
+        """합계 지표(revenue)의 결측일은 0.0으로 채워야 한다."""
+        result = adapter.get_metric_by_segments(
+            GAME_ID, "revenue", (FULL_START, FULL_END), ["country"]
+        )
+        country_segs = result["segments"]["country"]
+        for country, values in country_segs.items():
+            for v in values:
+                # 합계 지표는 None이 아니라 0.0 이상 float
+                assert v is not None and v >= 0.0, (
+                    f"{country}: 합계 지표에 None 또는 음수 {v}. "
+                    "결측이면 0.0, 있으면 양수여야 함"
+                )
+
 
 # ════════════════════════════════════════════════════════════════════
 # get_available_dimensions

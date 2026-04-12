@@ -30,6 +30,10 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "datapilot_mock
 #: users 테이블에서 세그먼트 차원으로 노출하지 않을 컬럼
 _USER_META_COLUMNS = frozenset({"user_id", "install_date"})
 
+#: 비율 지표 — 결측 시 0.0이 아닌 None(JSON null)으로 채워야 함
+#: 이유: "결제 시도 0건"과 "결제 성공률 0%"는 완전히 다른 의미
+_RATIO_METRICS = frozenset({"payment_success_rate", "d7_retention"})
+
 #: 테이블별 한글 설명. information_schema에는 COMMENT가 없어 수동 매핑.
 _TABLE_DESCRIPTIONS: dict[str, str] = {
     "daily_kpi": "일별 KPI 집계 (Bottleneck Detector 입력)",
@@ -178,10 +182,12 @@ class DuckDBAdapter(GameDataRepository):
                 f"지원하지 않는 차원: {unknown}. 사용 가능: {sorted(allowed_dims)}"
             )
 
-        segments: dict[str, dict[str, list[float]]] = {}
+        fill = None if metric in _RATIO_METRICS else 0.0
+
+        segments: dict[str, dict[str, list[float | None]]] = {}
         for dim in dimensions:
             rows = self._run_segmented_metric(metric, dim, start, end)
-            segments[dim] = _pivot_to_timeseries(rows, all_dates)
+            segments[dim] = _pivot_to_timeseries(rows, all_dates, fill_value=fill)
 
         return {
             "game_id": game_id,
@@ -352,18 +358,21 @@ def _date_range_inclusive(start: date, end: date) -> list[date]:
 def _pivot_to_timeseries(
     rows: list[tuple[date, str, float]],
     all_dates: list[date],
-) -> dict[str, list[float]]:
+    fill_value: float | None = 0.0,
+) -> dict[str, list[float | None]]:
     """(date, segment, value) 롱포맷 → {segment: [v_day0, v_day1, ...]} 와이드포맷.
 
-    쿼리 결과에 없는 날짜는 0.0으로 채워 배열 길이를 period 크기에 맞춘다.
-    LLM이 "N일 시계열"을 받는다는 가정으로 동작하도록 일관성 유지.
+    쿼리 결과에 없는 날짜는 fill_value로 채워 배열 길이를 period 크기에 맞춘다.
+    - 합계 지표(revenue, dau): fill_value=0.0 — "그날 0원/0명"이 의미상 맞음
+    - 비율 지표(payment_success_rate, d7_retention): fill_value=None — "데이터 없음"
+      (0.0으로 채우면 LLM이 "성공률 0%"로 오해해 환각 유발)
     """
     # segment -> date -> value
     nested: dict[str, dict[date, float]] = {}
     for d, seg, v in rows:
         nested.setdefault(seg, {})[d] = v
 
-    result: dict[str, list[float]] = {}
+    result: dict[str, list[float | None]] = {}
     for segment, date_map in nested.items():
-        result[segment] = [date_map.get(d, 0.0) for d in all_dates]
+        result[segment] = [date_map.get(d, fill_value) for d in all_dates]
     return result
