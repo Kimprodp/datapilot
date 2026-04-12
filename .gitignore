@@ -215,5 +215,7 @@ __marimo__/
 # 생성된 DB 파일 (스크립트로 재생성)
 data/*.db
 
-# 내부 기획 문서 (Public 레포에 노출 X)
+# 내부 기획 문서
 docs/datapilot-planning.md
+docs/agents/
+docs/review-log.md
