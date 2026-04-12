@@ -25,9 +25,8 @@ Java 비유:
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from datetime import date
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from pydantic import ValidationError
@@ -515,31 +514,31 @@ class TestPipelineRunHappyPath:
         return _make_orchestrator_with_mocks(anomaly_report)
 
     def test_returns_pipeline_report(self, orchestrator_and_repo):
-        orchestrator, mock_repo = orchestrator_and_repo
+        orchestrator, _ = orchestrator_and_repo
         result = orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         assert isinstance(result, PipelineReport)
 
     def test_analyzed_count_equals_segmentable_count(self, orchestrator_and_repo):
         """segmentable 이상(revenue, d7_retention) 2개 → analyzed 2개."""
-        orchestrator, mock_repo = orchestrator_and_repo
+        orchestrator, _ = orchestrator_and_repo
         result = orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         assert len(result.analyzed) == 2
 
     def test_unanalyzed_count_equals_non_segmentable_count(self, orchestrator_and_repo):
         """non-segmentable 이상(mau) 1개 → unanalyzed 1개."""
-        orchestrator, mock_repo = orchestrator_and_repo
+        orchestrator, _ = orchestrator_and_repo
         result = orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         assert len(result.unanalyzed) == 1
 
     def test_unanalyzed_metric_is_mau(self, orchestrator_and_repo):
         """unanalyzed에 mau가 담긴다."""
-        orchestrator, mock_repo = orchestrator_and_repo
+        orchestrator, _ = orchestrator_and_repo
         result = orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         assert result.unanalyzed[0].anomaly.metric == "mau"
 
     def test_analyzed_metrics_are_segmentable(self, orchestrator_and_repo):
         """analyzed에 revenue, d7_retention만 포함된다."""
-        orchestrator, mock_repo = orchestrator_and_repo
+        orchestrator, _ = orchestrator_and_repo
         result = orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         analyzed_metrics = {a.anomaly.metric for a in result.analyzed}
         assert analyzed_metrics == {"revenue", "d7_retention"}
@@ -1018,7 +1017,7 @@ class TestAnalyzeOnePipeline:
             anomalies=[_make_anomaly_item(metric="revenue")],
             normal=[],
         )
-        orchestrator, mock_repo = _make_orchestrator_with_mocks(anomaly_report)
+        orchestrator, _ = _make_orchestrator_with_mocks(anomaly_report)
         orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
 
         call_args = orchestrator._validator.validate.call_args

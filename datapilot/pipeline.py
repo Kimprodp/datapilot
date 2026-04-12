@@ -13,8 +13,7 @@ Java 비유:
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
 
@@ -33,8 +32,6 @@ from datapilot.agents.segmentation_analyzer import (
     SegmentationReport,
 )
 from datapilot.repository.port import SUPPORTED_SEGMENT_METRICS, GameDataRepository
-
-logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
 # 파이프라인 State 모델

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from datetime import date
 
 import pytest
