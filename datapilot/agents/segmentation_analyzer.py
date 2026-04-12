@@ -87,14 +87,15 @@ SYSTEM_PROMPT = """\
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
 USER_PROMPT_TEMPLATE = """\
-다음은 게임 {game_id}의 이상 지표 "{metric}"에 대한 세그먼트별 raw 시계열이다.
+다음은 게임 {game_id}의 이상 지표 "{metric_label}"에 대한 세그먼트별 raw 시계열이다.
 
 {segmented_json}
 
 이 데이터에서 이상이 어떤 세그먼트에 집중되어 있는지 판단하라. \
 각 세그먼트의 변화율을 계산하고, \
 "집중된 차원과 값", "전체 분해 결과", \
-"가설 발산 힌트가 되는 요약 문장"을 반환하라."""
+"가설 발산 힌트가 되는 요약 문장"을 반환하라.
+summary에는 영문 코드명이 아닌 한글 지표명("{metric_label}")을 사용하라."""
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -162,6 +163,6 @@ class SegmentationAnalyzer:
         # 3. LLM에게 집중 차원 식별 요청
         return self._chain.invoke({
             "game_id": game_id,
-            "metric": anomaly.metric,
+            "metric_label": anomaly.metric_label,
             "segmented_json": json.dumps(segmented, ensure_ascii=False),
         })

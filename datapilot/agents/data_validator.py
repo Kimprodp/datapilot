@@ -44,7 +44,7 @@ from datapilot.repository.port import GameDataRepository
 # ──────────────────────────────────────────────────────────────────
 
 #: 에이전트 루프 최대 라운드 (무한 루프 방어)
-MAX_TOOL_ROUNDS = 5
+MAX_TOOL_ROUNDS = 10
 
 _DANGEROUS_PATTERN = re.compile(
     r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE"
@@ -375,7 +375,7 @@ class DataValidator:
             return ValidationResult(
                 hypothesis=hypothesis.hypothesis,
                 status="unverified",
-                evidence="검증 라운드 초과 (MAX_TOOL_ROUNDS)",
+                evidence="가용 데이터로 검증할 수 없습니다 (추가 데이터 필요)",
                 queries_run=queries_run,
                 query_results=query_results,
             )
