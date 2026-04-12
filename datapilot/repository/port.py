@@ -181,10 +181,15 @@ class GameDataRepository(ABC):
         보안 주의:
             이 메서드는 "연결 수준의 안전 조건"만 책임진다.
             - read-only 모드 연결 (쓰기/DDL은 DB 레벨에서 거부)
-            - 결과 행 수 `max_rows` 제한
+            - 결과 행 수 `max_rows` 제한 (Python fetchmany 레벨)
 
             "쿼리 내용 수준의 검증"(SELECT-only 정규식, 위험 키워드 블랙리스트,
             테이블 화이트리스트)은 Phase 6 Data Validator의 Tool 래퍼가 담당한다.
+
+            비용 주의:
+            `max_rows`는 반환 행 수만 제한하며 **스캔 비용은 제한하지 않는다**.
+            DuckDB(로컬)에서는 무해하지만, BigQueryAdapter 구현 시에는
+            `QueryJobConfig(maximum_bytes_billed=...)` 등 별도 비용 상한 설정이 필요하다.
 
         Args:
             query: 실행할 SQL

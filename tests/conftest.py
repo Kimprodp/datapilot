@@ -9,22 +9,18 @@ Java 비유:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import duckdb
 import pytest
 
-from datapilot.repository.duckdb_adapter import DuckDBAdapter
-
-_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "datapilot_mock.db"
+from datapilot.repository.duckdb_adapter import DEFAULT_DB_PATH, DuckDBAdapter
 
 
 @pytest.fixture(scope="session")
 def mock_db_conn():
     """실제 Mock DB를 read-only로 연 DuckDB 연결. 세션 내 한 번만 열린다."""
-    if not _DB_PATH.exists():
-        pytest.skip(f"Mock DB 파일 없음: {_DB_PATH}. seed_mock_data.py 먼저 실행 필요.")
-    conn = duckdb.connect(str(_DB_PATH), read_only=True)
+    if not DEFAULT_DB_PATH.exists():
+        pytest.skip(f"Mock DB 파일 없음: {DEFAULT_DB_PATH}. seed_mock_data.py 먼저 실행 필요.")
+    conn = duckdb.connect(str(DEFAULT_DB_PATH), read_only=True)
     yield conn
     conn.close()
 
