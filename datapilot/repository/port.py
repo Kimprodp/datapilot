@@ -20,6 +20,31 @@ from abc import ABC, abstractmethod
 from datetime import date
 from typing import Any
 
+# ──────────────────────────────────────────────────────────────────
+# 세그먼트 분해 지원 metric 계약
+# ──────────────────────────────────────────────────────────────────
+
+SUPPORTED_SEGMENT_METRICS: frozenset[str] = frozenset(
+    {"revenue", "dau", "payment_success_rate", "d7_retention"}
+)
+"""get_metric_by_segments가 분해할 수 있는 metric.
+
+현재 4개만 지원. 어댑터 내부에 metric → (테이블, 조인, 집계) 매핑이
+하드코딩되어 있기 때문 (duckdb_adapter._run_segmented_metric 참조).
+
+① Bottleneck Detector는 daily_kpi의 11개 지표를 자유롭게 탐지하며,
+파이프라인 오케스트레이터(Phase 7)가 이 상수로 segmentable / non-segmentable을
+분류한다. non-segmentable 지표는 ② 호출 없이 "탐지 보존 카드"로 처리.
+
+사용 예 (Phase 7):
+    from datapilot.repository.port import SUPPORTED_SEGMENT_METRICS
+
+    if anomaly.metric in SUPPORTED_SEGMENT_METRICS:
+        seg_result = segmentation_analyzer.analyze(anomaly, repo)
+    else:
+        reports.append(UnanalyzedAnomalyCard(anomaly=anomaly, ...))
+"""
+
 
 class GameDataRepository(ABC):
     """게임 KPI 데이터 조회 Port.
@@ -66,8 +91,20 @@ class GameDataRepository(ABC):
         ...
 
     # ────────────────────────────────────────────────────────────────
-    # ② Segmentation Analyzer — 지표 × 세그먼트 분해
+    # ② Segmentation Analyzer — 세그먼트 차원 탐지 + 지표 분해
     # ────────────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def get_available_dimensions(self, game_id: str) -> list[str]:
+        """세그먼트 분석에 사용 가능한 차원 컬럼을 자동 탐지한다.
+
+        `users` 테이블에서 세그먼트 성격의 컬럼만 추출한다 (PK·날짜 제외).
+        Mock DB에 컬럼을 추가하기만 하면 에이전트가 자동으로 인식한다.
+
+        Returns:
+            예: ["platform", "country", "user_type", "device_model"]
+        """
+        ...
 
     @abstractmethod
     def get_metric_by_segments(
@@ -79,9 +116,12 @@ class GameDataRepository(ABC):
     ) -> dict[str, Any]:
         """이상 지표를 세그먼트 차원별로 분해한 시계열을 조회한다.
 
+        지원 metric은 SUPPORTED_SEGMENT_METRICS 참조 (현재 4개).
+        미지원 metric이 들어오면 ValueError.
+
         Args:
             game_id: 게임 식별자
-            metric: 이상 지표명 (예: "revenue", "d7_retention", "payment_success_rate", "dau")
+            metric: 이상 지표명 — SUPPORTED_SEGMENT_METRICS에 포함된 값만 허용
             period: (시작일, 종료일) inclusive
             dimensions: 분해할 차원 목록 (예: ["platform", "country", "user_type", "device_model"])
 
@@ -96,18 +136,6 @@ class GameDataRepository(ABC):
                     }
                 }
             }
-        """
-        ...
-
-    @abstractmethod
-    def get_available_dimensions(self, game_id: str) -> list[str]:
-        """세그먼트 분석에 사용 가능한 차원 컬럼을 자동 탐지한다.
-
-        `users` 테이블에서 세그먼트 성격의 컬럼만 추출한다 (PK·날짜 제외).
-        Mock DB에 컬럼을 추가하기만 하면 에이전트가 자동으로 인식한다.
-
-        Returns:
-            예: ["platform", "country", "user_type", "device_model"]
         """
         ...
 

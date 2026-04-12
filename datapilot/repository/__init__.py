@@ -4,6 +4,6 @@
 """
 
 from datapilot.repository.duckdb_adapter import DuckDBAdapter
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import SUPPORTED_SEGMENT_METRICS, GameDataRepository
 
-__all__ = ["GameDataRepository", "DuckDBAdapter"]
+__all__ = ["GameDataRepository", "DuckDBAdapter", "SUPPORTED_SEGMENT_METRICS"]

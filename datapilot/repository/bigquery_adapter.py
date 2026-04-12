@@ -59,6 +59,13 @@ class BigQueryAdapter(GameDataRepository):
         #   ORDER BY date
         raise self._not_implemented("get_daily_kpi")
 
+    def get_available_dimensions(self, game_id: str) -> list[str]:
+        # 구현 예시:
+        #   SELECT column_name
+        #   FROM `{project}.{dataset}`.INFORMATION_SCHEMA.COLUMNS
+        #   WHERE table_name = 'users'
+        raise self._not_implemented("get_available_dimensions")
+
     def get_metric_by_segments(
         self,
         game_id: str,
@@ -70,13 +77,6 @@ class BigQueryAdapter(GameDataRepository):
         # 파라미터 바인딩으로 안 되고 쿼리 템플릿 문자열 치환 + 화이트리스트 검증이 필요.
         # DuckDBAdapter와 동일한 안전 로직을 재사용해야 한다.
         raise self._not_implemented("get_metric_by_segments")
-
-    def get_available_dimensions(self, game_id: str) -> list[str]:
-        # 구현 예시:
-        #   SELECT column_name
-        #   FROM `{project}.{dataset}`.INFORMATION_SCHEMA.COLUMNS
-        #   WHERE table_name = 'users'
-        raise self._not_implemented("get_available_dimensions")
 
     def get_available_schema(self, game_id: str) -> dict[str, Any]:
         # 구현 예시:
