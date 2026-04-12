@@ -37,13 +37,12 @@ Java 비유:
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from datapilot.agents.data_validator import (
     DataValidator,
-    ValidationResult,
     _extract_table_names,
     classify,
 )

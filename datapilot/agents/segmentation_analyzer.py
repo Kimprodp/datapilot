@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from typing import Any, Literal
+from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
