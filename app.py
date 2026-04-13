@@ -108,9 +108,13 @@ def _severity_badge(severity: str) -> str:
 
 def _app_header() -> None:
     st.title("DataPilot")
-    st.caption(_APP_SUBTITLE)
-    st.caption("현재 데모 버전으로, 가상의 게임 데이터를 기반으로 동작합니다. 분석에 약 10분이 소요됩니다.")
-    st.divider()
+    st.markdown(
+        f"<div style='color:#888;font-size:14px;margin-top:-10px;'>{_APP_SUBTITLE}</div>"
+        "<div style='color:#888;font-size:14px;margin-top:2px;'>"
+        "현재 데모 버전으로, 가상의 게임 데이터를 기반으로 동작합니다. 분석에 약 10분이 소요됩니다.</div>"
+        "<hr style='margin:12px 0 18px 0;border:none;border-top:1px solid #eee;'>",
+        unsafe_allow_html=True,
+    )
 
 
 def _format_elapsed(seconds: float) -> str:
