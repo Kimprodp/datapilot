@@ -101,12 +101,16 @@ def classify(
 
     ③에서 각 가설에 넣어둔 ``required_tables`` 필드를 기반으로 한다.
     LLM 호출 없이 즉시 판정해 API 비용을 절감한다.
+
+    ANY match: required_tables 중 하나라도 가용 테이블에 있으면
+    verifiable로 판정한다. LLM이 외부 테이블을 섞어 넣어도
+    가용 테이블만으로 부분 검증을 시도할 수 있다.
     """
     if not hypothesis.required_tables:
         return "unverifiable"
-    if not set(hypothesis.required_tables).issubset(available_tables):
-        return "unverifiable"
-    return "verifiable"
+    if set(hypothesis.required_tables) & available_tables:
+        return "verifiable"
+    return "unverifiable"
 
 
 # ──────────────────────────────────────────────────────────────────
