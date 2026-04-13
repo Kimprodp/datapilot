@@ -127,7 +127,7 @@ def _extract_detail(comparison_detail: str) -> str:
     comparison_detail에서 괄호 안 내용만 추출한다.
     괄호가 없으면 원본을 그대로 반환.
     """
-    match = re.search(r"\((.+)\)\s*$", comparison_detail)
+    match = re.search(r"\(([^)]+)\)\s*$", comparison_detail)
     return match.group(1) if match else comparison_detail
 
 
@@ -251,7 +251,13 @@ _METRIC_DISPLAY: dict[str, str] = {
     "revenue": "인앱결제 매출",
     "dau": "DAU",
     "payment_success_rate": "결제 성공률",
+    "d1_retention": "D1 리텐션",
     "d7_retention": "D7 리텐션",
+    "arppu": "유저당 평균 결제액",
+    "new_installs": "신규 설치",
+    "sessions": "세션 수",
+    "avg_session_sec": "평균 세션 길이",
+    "mau": "MAU",
 }
 
 
@@ -357,8 +363,23 @@ def page_running() -> None:
             "margin-top:8px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
         )
         for metric in card_order:
-            steps = cards[metric]
             label = _METRIC_DISPLAY.get(metric, metric)
+
+            # 세부 분석 미지원 카드
+            if metric in unsupported_metrics:
+                html += (
+                    f"<div style='border:1.5px solid #e0e0e0;border-radius:8px;"
+                    f"margin-bottom:16px;padding:14px 16px;background:#fafafa;'>"
+                    f"<div style='display:flex;align-items:center;"
+                    f"justify-content:space-between;'>"
+                    f"<span style='font-size:14px;font-weight:600;color:#333;'>"
+                    f"{label}</span>"
+                    f"<span style='font-size:11px;color:#888;'>세부 분석 미지원</span>"
+                    f"</div></div>"
+                )
+                continue
+
+            steps = cards[metric]
 
             all_done = all(s[0] == "done" for s in steps.values())
             has_error = metric in card_errors
@@ -403,11 +424,19 @@ def page_running() -> None:
 
     # ── 콜백 ──
 
+    # 세부 분석 미지원 지표 추적
+    unsupported_metrics: set[str] = set()
+
     def on_step(step: PipelineStep) -> None:
         if step.agent == "bottleneck":
             detection["status"] = step.status
             detection["summary"] = step.summary
             render_detection()
+        elif step.agent == "unsupported":
+            unsupported_metrics.add(step.metric)
+            if step.metric not in card_order:
+                card_order.append(step.metric)
+            render_cards()
         else:
             m = step.metric
             if m not in cards:
@@ -547,7 +576,10 @@ def _render_anomaly_cards(
 
             sev_bg, sev_fg = _SEVERITY_COLORS.get(anomaly.severity, ("#e2e3e5", "#383d41"))
             korean_name = _korean_label(anomaly.metric_label)
-            change_text = anomaly.change_display.replace("->", "→").replace("- >", "→")
+            raw_change = anomaly.change_display.replace("->", "→").replace("- >", "→")
+            # 상단 카드: 비율 지표의 "98.1% → 92.4% (-5.7%p)" → "-5.7%p" 만 표시
+            paren = re.search(r"\(([^)]+%p)\)", raw_change)
+            change_text = paren.group(1) if paren else raw_change
 
             st.markdown(
                 f"<div style='border:1.5px solid {border};background:{bg};padding:12px;"
@@ -570,8 +602,13 @@ def _render_anomaly_cards(
 def page_report() -> None:
     report: PipelineReport = st.session_state.report
     _app_header()
+    period = st.session_state.get("period")
+    if period:
+        date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
+    else:
+        date_range = st.session_state.period_label
     st.subheader(
-        f"분석 완료 — {st.session_state.game_name} ({st.session_state.period_label})"
+        f"분석 완료 — {st.session_state.game_name} ({date_range})"
     )
 
     if not report.analyzed and not report.unanalyzed:
@@ -621,25 +658,53 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
     seg = analysis.segmentation
     with st.container(border=True):
         st.markdown(_card_header("세그먼트 분해", "② 세그먼트 분석"), unsafe_allow_html=True)
-        st.markdown(f":red[{seg.summary}]")
+        st.markdown(
+            f"<div style='color:#e74c3c;font-size:14px;line-height:1.6;'>{seg.summary}</div>",
+            unsafe_allow_html=True,
+        )
+
+        # 전체 차원에서 최대 절대값 (모든 그룹 공통 기준)
+        global_max = max(
+            (abs(v) for vals in seg.breakdown.values() for v in vals.values()),
+            default=1,
+        )
 
         for dim, values in seg.breakdown.items():
-            # 그룹 제목: 해당 차트 바로 위에 붙도록 margin-top 추가
+            # 그룹 제목
             st.markdown(
                 f"<div style='font-size:12px;color:#888;margin-top:16px;margin-bottom:6px;'>"
                 f"{dim}별 변화율</div>",
                 unsafe_allow_html=True,
             )
-            for seg_name, change_val in values.items():
-                color = "red" if change_val < 0 else "green"
-                pct = f"{change_val:+.1%}" if abs(change_val) < 1 else f"{change_val:+.0%}"
-                bar_width = min(abs(change_val) * 500, 100)
+            max_abs = global_max
+
+            for seg_name, pct_val in values.items():
+                color = "#e74c3c" if pct_val < 0 else "#27ae60"
+                pct = f"{pct_val:+.1f}%"
+                bar_pct = abs(pct_val) / max_abs * 50  # 50% = 한쪽 최대폭
+                if pct_val < 0:
+                    # 음수: 가운데에서 왼쪽으로
+                    bar_html = (
+                        f"<div style='flex:1;display:flex;height:20px;'>"
+                        f"<div style='flex:1;display:flex;justify-content:flex-end;'>"
+                        f"<div style='width:{bar_pct * 2}%;height:100%;background:{color};border-radius:4px 0 0 4px;opacity:0.5;'></div></div>"
+                        f"<div style='width:1px;background:#ccc;'></div>"
+                        f"<div style='flex:1;'></div></div>"
+                    )
+                else:
+                    # 양수: 가운데에서 오른쪽으로
+                    bar_html = (
+                        f"<div style='flex:1;display:flex;height:20px;'>"
+                        f"<div style='flex:1;'></div>"
+                        f"<div style='width:1px;background:#ccc;'></div>"
+                        f"<div style='flex:1;display:flex;'>"
+                        f"<div style='width:{bar_pct * 2}%;height:100%;background:{color};border-radius:0 4px 4px 0;opacity:0.5;'></div></div></div>"
+                    )
                 st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:12px;margin:4px 0;'>"
+                    f"<div style='display:flex;align-items:center;gap:8px;margin:4px 0;'>"
                     f"<span style='width:80px;text-align:right;font-size:13px;color:#555;'>{seg_name}</span>"
-                    f"<div style='flex:1;height:20px;background:#eee;border-radius:4px;'>"
-                    f"<div style='width:{bar_width}%;height:100%;background:{color};border-radius:4px;opacity:0.5;'></div></div>"
-                    f"<span style='width:55px;font-size:13px;font-weight:600;color:{color};'>{pct}</span>"
+                    f"{bar_html}"
+                    f"<span style='width:60px;font-size:13px;font-weight:600;color:{color};'>{pct}</span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -658,7 +723,9 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
             vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
             badge = _badge_html(vr_label, bg, fg)
             ev_color = "#555" if vr.status == "supported" else "#888"
-            ev_text = vr.evidence or vr.required_data or ""
+            ev_raw = vr.evidence or vr.required_data or ""
+            # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
+            ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
             is_last = vi == len(sorted_results) - 1
             border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
             st.markdown(
@@ -706,7 +773,8 @@ def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.warning(f"원인 불명 — {rc.root_cause.summary}")
+            summary_text = rc.root_cause.summary.replace("원인 불명", "").strip(" —\n")
+            st.warning(f"원인 불명 — {summary_text}" if summary_text else "원인 불명")
 
         if rc.additional_investigation:
             items_html = "".join(

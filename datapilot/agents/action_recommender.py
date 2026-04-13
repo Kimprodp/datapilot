@@ -106,7 +106,9 @@ SYSTEM_PROMPT = (
     "5. urgent 액션은 최소 1개 이상 포함한다 "
     "(PM이 오늘 결정할 수 있도록).\n"
     "6. 액션은 추상적 지시('개선한다', '검토한다')가 아닌 "
-    "구체적 행동('X를 Y로 롤백한다')으로 작성한다.\n\n"
+    "구체적 행동('X를 Y로 롤백한다')으로 작성한다.\n"
+    "7. title은 20자 내외로 간결하게 작성한다.\n"
+    "8. 의미 있는 액션만 최대 5개까지 제안한다. 억지로 5개를 맞출 필요는 없다.\n\n"
     "출력은 반드시 지정된 JSON 스키마를 따른다."
 )
 
@@ -149,6 +151,7 @@ class ActionRecommender:
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
+                temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

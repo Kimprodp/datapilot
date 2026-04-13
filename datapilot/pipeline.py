@@ -182,9 +182,10 @@ class PipelineOrchestrator:
             )
             analyzed.append(result)
 
-        unanalyzed = [
-            UnanalyzedAnomaly(anomaly=a) for a in non_segmentable
-        ]
+        unanalyzed = []
+        for a in non_segmentable:
+            _notify("unsupported", "done", "세부 분석 미지원", metric=a.metric)
+            unanalyzed.append(UnanalyzedAnomaly(anomaly=a))
 
         return PipelineReport(
             game_id=game_id,

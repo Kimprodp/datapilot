@@ -431,7 +431,7 @@ def seed_sessions(conn: duckdb.DuckDBPyConnection):
             # D7 리텐션 시나리오: 이벤트 종료 후, 설치 7일차 유저만 복귀 확률 감소
             # DAU 전체에는 영향 거의 없고 D7 리텐션만 ~5pp 하락
             if install_date == d7_target_date and is_after_event:
-                login_rate = 0.25  # 30% → 25% (-5pp)
+                login_rate = 0.15  # 30% → 15% (-15pp)
             else:
                 login_rate = 0.30
 

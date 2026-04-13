@@ -53,7 +53,7 @@ class SegmentationReport(BaseModel):
         description="가장 집중된 세그먼트"
     )
     breakdown: dict[str, dict[str, float]] = Field(
-        description="전체 차원별 세그먼트 변화율"
+        description="전체 차원별 세그먼트 변화율. 퍼센트 단위 숫자로 반환 (예: -14.2는 -14.2% 의미)"
     )
     summary: str = Field(
         description="가설 발산 힌트가 되는 요약 문장"
@@ -77,12 +77,14 @@ SYSTEM_PROMPT = """\
 "가장 집중된 차원"을 식별한다.
 2. 한 세그먼트만 영향받고 나머지가 정상이면 → 집중형(concentrated)
 3. 모든 세그먼트가 고르게 영향받으면 → 확산형(spread)
-4. 두 차원이 교차하여 영향받는 경우(예: "신규 유저의 Android")도 포착한다.
+4. 두 차원이 교차하여 영향받는 경우(예: "신규 유저의 Android")도 포착한다. \
+두 개 이상 차원에서 동시에 집중이 발견되면 교차형(crossed)으로 판정하고, \
+concentration에 교차된 조합을 명시한다.
 5. summary는 다음 형식을 따른다:
-   - 집중형: "{{지표}} 감소가 {{세그먼트}}에 집중 ({{변화율}}, {{나머지}}는 {{수치}}로 정상)"
-     예: "매출 감소가 Android에 집중 (-18%, iOS는 +0.2%로 정상)"
+   - 집중형: "{{지표}} 감소가 {{세그먼트}}에 집중 ({{변화율}}, 나머지는 {{범위}})"
+     예: "매출 감소가 Android에 집중 (-18%, 나머지는 -2%~+1%)"
    - 확산형: "{{지표}} 감소가 특정 세그먼트에 집중되지 않음 (전반적 하락)"
-   구체적 수치를 반드시 포함한다.
+   핵심 세그먼트 수치를 포함하되, 나머지 세그먼트는 범위로 요약한다.
 
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
@@ -95,7 +97,11 @@ USER_PROMPT_TEMPLATE = """\
 각 세그먼트의 변화율을 계산하고, \
 "집중된 차원과 값", "전체 분해 결과", \
 "가설 발산 힌트가 되는 요약 문장"을 반환하라.
-summary에는 영문 코드명이 아닌 한글 지표명("{metric_label}")을 사용하라."""
+breakdown에는 변화율을 퍼센트 단위 숫자로 넣는다 (예: -14.2는 -14.2% 의미, 0.01 같은 소수 비율이 아님). \
+raw 합산값이나 절대량은 포함하지 않는다.
+summary에는 영문 코드명·괄호 표기를 제외하고 한글 지표명만 사용하라. \
+국가명은 한글로 표기한다 (예: brazil → 브라질). \
+플랫폼(Android, iOS)은 그대로 사용한다."""
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -122,6 +128,7 @@ class SegmentationAnalyzer:
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
+                temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

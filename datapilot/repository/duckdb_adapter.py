@@ -37,17 +37,17 @@ _RATIO_METRICS = frozenset({"payment_success_rate", "d7_retention"})
 #: 테이블별 한글 설명. information_schema에는 COMMENT가 없어 수동 매핑.
 _TABLE_DESCRIPTIONS: dict[str, str] = {
     "daily_kpi": "일별 KPI 집계 (Bottleneck Detector 입력)",
-    "users": "유저 마스터 (세그먼트 차원 4종 보유)",
-    "products": "상품 마스터 (price_tier, category)",
-    "payments": "결제 이벤트 (status: success/failed/refunded)",
-    "shop_impressions": "상점 진열 노출 로그 (slot_order)",
-    "releases": "빌드 배포 이력 (build_notes)",
-    "events": "인게임 이벤트 로그 (login/stage_clear/purchase/event_participate)",
-    "sessions": "세션 로그",
-    "content_releases": "컨텐츠/이벤트 스케줄 (season_event 포함)",
-    "gateways": "PG사 정보",
-    "payment_attempts": "결제 시도 로그 (gateway별 success/failed)",
-    "payment_errors": "결제 에러 상세",
+    "users": "유저 마스터 (세그먼트 차원: platform, country, user_type, device_model)",
+    "products": "상품 마스터 (price_tier, category). 상품별 가격대 확인",
+    "payments": "결제 이벤트 (user_id, product_id, amount, status, timestamp). 유저별 결제 내역 추적",
+    "shop_impressions": "상점 진열 노출 로그 (product_id, slot_order, platform, date). 앱 업데이트 전후 상품 진열 순서 변화 분석에 활용",
+    "releases": "앱 빌드 배포 이력 (platform, version, released_at, build_notes). 특정 날짜 배포와 이상 시점 연관 분석",
+    "events": "인게임 이벤트 로그 (user_id, event_type: login/stage_clear/purchase/event_participate, event_time)",
+    "sessions": "세션 로그 (user_id, session_start, session_end). 리텐션·활성화 분석",
+    "content_releases": "컨텐츠/이벤트 스케줄 (content_type, name, start_date, end_date). 이벤트 종료 시점과 지표 변화 연관 분석",
+    "gateways": "PG사 정보 (name, region, status: active/degraded/down). PG사 장애 상태 확인",
+    "payment_attempts": "결제 시도 로그 (user_id, gateway, status: success/failed, attempt_time). 게이트웨이별 성공률 분석",
+    "payment_errors": "결제 에러 상세 (error_code, error_message, gateway, first_seen). PG사별 에러 패턴 추적",
 }
 
 

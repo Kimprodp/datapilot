@@ -44,7 +44,7 @@ from datapilot.repository.port import GameDataRepository
 # ──────────────────────────────────────────────────────────────────
 
 #: 에이전트 루프 최대 라운드 (무한 루프 방어)
-MAX_TOOL_ROUNDS = 10
+MAX_TOOL_ROUNDS = 5
 
 _DANGEROUS_PATTERN = re.compile(
     r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE"
@@ -79,13 +79,20 @@ class ValidationResult(BaseModel):
     )
 
 
-class _Verdict(BaseModel):
-    """에이전트 내부용: LLM 분석 결과에서 판정을 추출."""
+class _VerdictItem(BaseModel):
+    """배치 검증 결과 내 단일 가설 판정."""
 
+    hypothesis: str = Field(description="가설 원문 (입력과 동일)")
     status: Literal["supported", "rejected", "evidence_insufficient"] = Field(
         description="판정 상태"
     )
     evidence: str = Field(description="판정 근거 요약")
+
+
+class _BatchVerdict(BaseModel):
+    """배치 검증 전체 결과."""
+
+    verdicts: list[_VerdictItem] = Field(description="각 가설의 판정 목록")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -101,12 +108,16 @@ def classify(
 
     ③에서 각 가설에 넣어둔 ``required_tables`` 필드를 기반으로 한다.
     LLM 호출 없이 즉시 판정해 API 비용을 절감한다.
+
+    ANY match: required_tables 중 하나라도 가용 테이블에 있으면
+    verifiable로 판정한다. LLM이 외부 테이블을 섞어 넣어도
+    가용 테이블만으로 부분 검증을 시도할 수 있다.
     """
     if not hypothesis.required_tables:
         return "unverifiable"
-    if not set(hypothesis.required_tables).issubset(available_tables):
-        return "unverifiable"
-    return "verifiable"
+    if set(hypothesis.required_tables) & available_tables:
+        return "verifiable"
+    return "unverifiable"
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -145,40 +156,44 @@ def _extract_table_names(sql: str) -> set[str]:
 
 SYSTEM_PROMPT = """\
 너는 게임 데이터 가설 검증 전문가다. \
-주어진 가설을 검증하기 위해 SQL을 생성·실행하고, \
-결과를 해석해 가설의 참/거짓을 판정한다.
+여러 가설을 동시에 검증하기 위해 SQL을 생성·실행하고, \
+결과를 해석해 각 가설의 참/거짓을 판정한다.
 
 작업 원칙:
 1. execute_sql 도구를 사용해 필요한 SQL을 실행할 수 있다. \
 SELECT만 허용되며, 주어진 가용 테이블 안에서만 조회한다.
-2. 한 가설당 1~3회의 SQL 실행을 권장한다. 불필요한 반복 호출을 피한다.
-3. SQL 실행 결과를 근거로 가설이 데이터에 의해 \
+2. 여러 가설에 같은 테이블 데이터가 필요하면 SQL 결과를 공유한다. \
+동일 쿼리를 반복 실행하지 않는다.
+3. SQL 실행 결과를 근거로 각 가설이 데이터에 의해 \
 지지되는가(supported), 반박되는가(rejected)를 판정한다.
-4. 판정 근거를 구체적인 수치와 함께 명시한다.
+4. 판정 근거는 핵심 수치 1~2개만 인용해 1~2문장으로 간결하게 명시한다. \
+한 문장이 50자를 넘지 않도록 한다.
 5. 결과가 애매하거나 증거가 부족하면 "evidence_insufficient"로 판정한다.
+6. rejected 판정 시 evidence에 새로운 가설이나 추가 검증 제안을 포함하지 않는다. \
+오직 기각 근거만 간결하고 명확하게 서술한다.
 
-분석이 끝나면 최종 판정과 근거를 텍스트로 서술하라."""
+분석이 끝나면 각 가설별로 최종 판정과 근거를 텍스트로 서술하라."""
 
 USER_PROMPT_TEMPLATE = """\
-다음 가설을 검증하라.
+다음 가설들을 검증하라.
 
-[가설]
-{hypothesis_text}
-
-[근거로 제시된 이유]
-{hypothesis_reasoning}
-
-[검증에 필요한 테이블]
-{required_tables}
+{hypotheses_text}
 
 [가용 테이블 스키마]
 {available_schema_json}
 
 execute_sql 도구를 사용해 필요한 SQL을 실행한 뒤, \
-가설의 상태를 판정하고 근거를 서술하라."""
+각 가설의 상태를 판정하고 근거를 서술하라. \
+여러 가설에 같은 데이터가 필요하면 SQL 결과를 공유하라."""
 
-_VERDICT_SYSTEM = "가설 검증 분석 결과를 구조화하라."
-_VERDICT_USER = "가설: {hypothesis}\n\n분석 결과:\n{analysis}"
+_VERDICT_SYSTEM = "가설 검증 분석 결과를 각 가설별로 구조화하라."
+_VERDICT_USER = """\
+다음 가설들에 대한 분석 결과를 구조화하라.
+
+{hypotheses_text}
+
+분석 결과:
+{analysis}"""
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -212,6 +227,7 @@ class DataValidator:
             model=SONNET_MODEL,
             api_key=ANTHROPIC_API_KEY,
             max_tokens=MAX_TOKENS,
+            temperature=0.3,
         )
 
         # 동적으로 갱신되는 화이트리스트 (validate 호출 시 설정)
@@ -224,7 +240,7 @@ class DataValidator:
                 ("system", _VERDICT_SYSTEM),
                 ("user", _VERDICT_USER),
             ])
-            | base_llm.with_structured_output(_Verdict)
+            | base_llm.with_structured_output(_BatchVerdict)
         )
 
     # ── Tool 생성 ─────────────────────────────────────────────
@@ -298,45 +314,68 @@ class DataValidator:
         hypothesis_list: HypothesisList,
         available_schema: dict[str, Any],
     ) -> list[ValidationResult]:
-        """가설 목록을 검증한다.
+        """가설 목록을 배치로 검증한다.
+
+        verifiable 가설을 하나의 LLM 대화에서 동시에 검증해
+        API 호출을 줄이고, SQL 결과를 가설 간 공유한다.
 
         Args:
             hypothesis_list: ③ 의 출력.
             available_schema: ``repo.get_available_schema()`` 반환값.
 
         Returns:
-            각 가설에 대한 ValidationResult 리스트.
+            각 가설에 대한 ValidationResult 리스트 (입력 순서 유지).
         """
         self._allowed_tables = frozenset(
             t["name"] for t in available_schema["tables"]
         )
 
-        results: list[ValidationResult] = []
-        for h in hypothesis_list.hypotheses:
+        # 1. 분류: verifiable / unverifiable 분리
+        verifiable: list[tuple[int, Hypothesis]] = []
+        results_map: dict[int, ValidationResult] = {}
+
+        for i, h in enumerate(hypothesis_list.hypotheses):
             if classify(h, self._allowed_tables) == "unverifiable":
-                results.append(ValidationResult(
+                results_map[i] = ValidationResult(
                     hypothesis=h.hypothesis,
                     status="unverified",
                     required_data=h.required_data,
-                ))
-            else:
-                results.append(
-                    self._llm_validate(h, available_schema),
                 )
-        return results
+            else:
+                verifiable.append((i, h))
 
-    # ── LLM + Tool Use 검증 ──────────────────────────────────
+        # 2. 배치 검증: verifiable 가설을 하나의 대화에서 처리
+        if verifiable:
+            batch_results = self._llm_validate_batch(
+                [h for _, h in verifiable], available_schema,
+            )
+            for (i, _), result in zip(verifiable, batch_results):
+                results_map[i] = result
 
-    def _llm_validate(
+        # 3. 입력 순서대로 반환
+        return [
+            results_map[i]
+            for i in range(len(hypothesis_list.hypotheses))
+        ]
+
+    # ── 배치 LLM + Tool Use 검증 ────────────────────────────
+
+    def _llm_validate_batch(
         self,
-        hypothesis: Hypothesis,
+        hypotheses: list[Hypothesis],
         available_schema: dict[str, Any],
-    ) -> ValidationResult:
-        """verifiable 가설 1개를 LLM + Tool Use로 검증한다."""
+    ) -> list[ValidationResult]:
+        """verifiable 가설 N개를 하나의 LLM 대화에서 검증한다."""
+        # 가설 목록 텍스트 구성
+        hypotheses_text = "\n\n".join(
+            f"[가설 {i + 1}]\n{h.hypothesis}\n"
+            f"근거: {h.reasoning}\n"
+            f"필요 테이블: {', '.join(h.required_tables)}"
+            for i, h in enumerate(hypotheses)
+        )
+
         user_content = USER_PROMPT_TEMPLATE.format(
-            hypothesis_text=hypothesis.hypothesis,
-            hypothesis_reasoning=hypothesis.reasoning,
-            required_tables=", ".join(hypothesis.required_tables),
+            hypotheses_text=hypotheses_text,
             available_schema_json=json.dumps(
                 available_schema, ensure_ascii=False,
             ),
@@ -348,10 +387,13 @@ class DataValidator:
 
         queries_run: list[str] = []
         query_results: list[Any] = []
-        response = None  # 방어적 초기화
+        response = None
 
-        # 에이전트 루프: LLM이 execute_sql을 호출할 때마다 실행
-        for _ in range(MAX_TOOL_ROUNDS):
+        # 배치용 라운드 상한: 가설 수에 비례
+        max_rounds = MAX_TOOL_ROUNDS * len(hypotheses)
+
+        # 에이전트 루프
+        for _ in range(max_rounds):
             response = self._llm_with_tools.invoke(messages)
             messages.append(response)
 
@@ -370,33 +412,47 @@ class DataValidator:
                     ToolMessage(content=result_str, tool_call_id=tc["id"]),
                 )
 
-        # 라운드 소진: LLM이 MAX_TOOL_ROUNDS 후에도 tool 호출을 시도한 경우
+        # 라운드 소진 시 전부 unverified
         if response and response.tool_calls:
-            return ValidationResult(
-                hypothesis=hypothesis.hypothesis,
-                status="unverified",
-                evidence="가용 데이터로 검증할 수 없습니다 (추가 데이터 필요)",
-                queries_run=queries_run,
-                query_results=query_results,
-            )
+            return [
+                ValidationResult(
+                    hypothesis=h.hypothesis,
+                    status="unverified",
+                    evidence="검증 라운드 소진 (추가 데이터 필요)",
+                    queries_run=queries_run,
+                    query_results=query_results,
+                )
+                for h in hypotheses
+            ]
 
-        # 판정 추출: 에이전트 루프 종료 후 별도 structured output 호출
+        # 배치 판정 추출: 1회 structured output 호출
         analysis_text = response.content if response else ""
-        verdict = self._verdict_chain.invoke({
-            "hypothesis": hypothesis.hypothesis,
+        batch_verdict = self._verdict_chain.invoke({
+            "hypotheses_text": hypotheses_text,
             "analysis": analysis_text,
         })
 
-        status: Literal["supported", "rejected", "unverified"]
-        if verdict.status == "evidence_insufficient":
-            status = "unverified"
-        else:
-            status = verdict.status
-
-        return ValidationResult(
-            hypothesis=hypothesis.hypothesis,
-            status=status,
-            evidence=verdict.evidence,
-            queries_run=queries_run,
-            query_results=query_results,
-        )
+        # 판정 매핑
+        results: list[ValidationResult] = []
+        for i, h in enumerate(hypotheses):
+            if i < len(batch_verdict.verdicts):
+                v = batch_verdict.verdicts[i]
+                status: Literal["supported", "rejected", "unverified"]
+                if v.status == "evidence_insufficient":
+                    status = "unverified"
+                else:
+                    status = v.status
+                results.append(ValidationResult(
+                    hypothesis=h.hypothesis,
+                    status=status,
+                    evidence=v.evidence,
+                    queries_run=queries_run,
+                    query_results=query_results,
+                ))
+            else:
+                results.append(ValidationResult(
+                    hypothesis=h.hypothesis,
+                    status="unverified",
+                    evidence="배치 판정에서 누락됨",
+                ))
+        return results

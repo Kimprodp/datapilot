@@ -57,7 +57,7 @@ class HypothesisList(BaseModel):
 
     anomaly: str = Field(description="대상 이상 지표명")
     hypotheses: list[Hypothesis] = Field(
-        default_factory=list, description="원인 가설 목록 (5~8개)"
+        default_factory=list, description="원인 가설 목록 (최대 5개)"
     )
 
 
@@ -76,12 +76,14 @@ SYSTEM_PROMPT = """\
 (예: Android 전용 배포)
    - spread: 전체 유저에 영향을 줄 수 있는 원인을 우선 탐색 \
 (예: 결제 시스템 장애, CDN 이슈)
-2. 최소 5개, 최대 8개의 가설을 생성한다. \
-놓치는 가설을 줄이기 위해 폭을 우선한다.
+2. 유력한 가설만 생성한다. 대부분 2~3개면 충분하며, \
+5개를 채울 필요는 없다. 확신이 낮은 가설은 포함하지 않는다.
 3. 각 가설에 대해 검증에 필요한 테이블 정보를 반드시 기재한다:
-   - 가용 테이블 안에 있는 가설 → required_tables에 실제 테이블명 배열로 기재
-   - 가용 테이블 밖인 가설 → required_tables는 빈 배열, \
-required_data에 자연어로 설명
+   - 가용 테이블로 부분 검증이라도 가능하면 반드시 required_tables에 해당 테이블명을 기재한다. \
+외부 데이터가 추가로 필요하더라도 가용 테이블에 관련 데이터가 있으면 포함한다.
+   - required_tables에는 가용 테이블 스키마의 테이블명을 정확히 복사한다. 추측하거나 변형하지 않는다.
+   - 가용 테이블과 완전히 무관한 가설만 required_tables를 빈 배열로 두고, \
+required_data에 자연어로 설명한다.
 4. required_data가 가용 테이블 밖인 가설도 반드시 포함한다. \
 PM이 "어떤 데이터를 추가 수집해야 하는지" 알 수 있게 해주는 것도 가치다.
 
@@ -99,7 +101,7 @@ USER_PROMPT_TEMPLATE = """\
 [가용 테이블 스키마]
 {available_schema_json}
 
-이 상황에서 가능한 원인 가설을 5~8개 발산하라. \
+이 상황에서 가장 유력한 원인 가설을 도출하라 (필요한 경우 최대 5개 까지만). \
 각 가설에 대해 "hypothesis", "reasoning", \
 "required_tables", "required_data"(가용 테이블 밖인 경우에만) \
 필드를 반드시 포함하라."""
@@ -131,6 +133,7 @@ class HypothesisGenerator:
                 model=OPUS_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
+                temperature=0.5,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
@@ -154,7 +157,7 @@ class HypothesisGenerator:
             repo: 가용 스키마 조회용 Port.
 
         Returns:
-            HypothesisList — 5~8개 가설 목록.
+            HypothesisList — 최대 5개 가설 목록.
         """
         available_schema = repo.get_available_schema(game_id)
 
