@@ -330,6 +330,8 @@ def page_running() -> None:
     card_order: list[str] = []
     card_errors: dict[str, str] = {}
     hyp_counts: dict[str, int] = {}
+    # metric → "증가"/"감소" 방향 추적
+    metric_direction: dict[str, str] = {}
 
     # ── 렌더링 함수 ──
 
@@ -360,10 +362,14 @@ def page_running() -> None:
             return
         html = (
             "<div style='font-size:13px;font-weight:600;color:#888;"
-            "margin-top:8px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
+            "margin-top:8px;margin-bottom:4px;'>이상 지표별 상세 분석</div>"
+            "<div style='font-size:11px;color:#aaa;margin-bottom:12px;'>"
+            "이상 지표 수에 따라 약 5~10분 소요될 수 있습니다.</div>"
         )
         for metric in card_order:
-            label = _METRIC_DISPLAY.get(metric, metric)
+            base_label = _METRIC_DISPLAY.get(metric, metric)
+            direction = metric_direction.get(metric, "")
+            label = f"{base_label} {direction}".strip()
 
             # 세부 분석 미지원 카드
             if metric in unsupported_metrics:
@@ -431,6 +437,14 @@ def page_running() -> None:
         if step.agent == "bottleneck":
             detection["status"] = step.status
             detection["summary"] = step.summary
+            # "이상 지표 5개 발견 (결제 성공률 감소, ...)" → metric별 방향 파싱
+            if step.status == "done" and "(" in step.summary:
+                inside = step.summary.split("(", 1)[1].rstrip(")")
+                for item in inside.split(","):
+                    item = item.strip()
+                    for code, display in _METRIC_DISPLAY.items():
+                        if display in item:
+                            metric_direction[code] = "증가" if "증가" in item else "감소"
             render_detection()
         elif step.agent == "unsupported":
             unsupported_metrics.add(step.metric)

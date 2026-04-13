@@ -155,7 +155,12 @@ class PipelineOrchestrator:
         kpi_series = self._repo.get_daily_kpi(game_id, period)
         anomaly_report = self._detector.detect(kpi_series)
         n = len(anomaly_report.anomalies)
-        _notify("bottleneck", "done", f"이상 지표 {n}개 발견")
+        labels = [a.metric_label.split("(")[0].strip() for a in anomaly_report.anomalies]
+        direction = [
+            f"{l} {'증가' if a.change > 0 else '감소'}"
+            for l, a in zip(labels, anomaly_report.anomalies)
+        ]
+        _notify("bottleneck", "done", f"이상 지표 {n}개 발견 ({', '.join(direction)})")
 
         # ── 분류: segmentable / non-segmentable ───────────────
         segmentable: list[AnomalyItem] = []
@@ -174,18 +179,18 @@ class PipelineOrchestrator:
             self._repo.get_available_schema(game_id) if segmentable else {}
         )
 
-        # ── 이상별 ②~⑥ 루프 ─────────────────────────────────
-        analyzed: list[AnomalyAnalysis] = []
-        for anomaly in segmentable:
-            result = self._analyze_one(
-                game_id, anomaly, period, available_schema, _notify,
-            )
-            analyzed.append(result)
-
+        # ── 미지원 지표 먼저 알림 (화면2에 카드 즉시 표시) ────
         unanalyzed = []
         for a in non_segmentable:
             _notify("unsupported", "done", "세부 분석 미지원", metric=a.metric)
             unanalyzed.append(UnanalyzedAnomaly(anomaly=a))
+
+        # ── 이상별 ②~⑥ (순차 실행) ────────────────────────────
+        analyzed: list[AnomalyAnalysis] = []
+        for anomaly in segmentable:
+            analyzed.append(self._analyze_one(
+                game_id, anomaly, period, available_schema, _notify,
+            ))
 
         return PipelineReport(
             game_id=game_id,
@@ -205,11 +210,9 @@ class PipelineOrchestrator:
         available_schema: dict[str, Any],
         notify: Callable[..., None],
     ) -> AnomalyAnalysis:
-        """segmentable 이상 지표 1개에 대해 ②~⑥을 순차 실행한다.
-
-        에이전트 실패 시 해당 스텝을 error 상태로 콜백한 뒤 예외를 재전파한다.
-        Phase 8 UI가 실패 스텝을 식별해 "다시 시도" 버튼을 표시할 수 있다.
-        """
+        """segmentable 이상 지표 1개에 대해 ②~⑥을 순차 실행한다."""
+        repo = self._repo
+        validator = self._validator
         m = anomaly.metric
         current_step = ""
 
@@ -218,7 +221,7 @@ class PipelineOrchestrator:
             current_step = "segmentation"
             notify("segmentation", "active", m, metric=m)
             segmentation = self._segmenter.analyze(
-                game_id, anomaly, period, self._repo,
+                game_id, anomaly, period, repo,
             )
             notify("segmentation", "done", segmentation.concentration.focus, metric=m)
 
@@ -226,14 +229,14 @@ class PipelineOrchestrator:
             current_step = "hypothesis"
             notify("hypothesis", "active", m, metric=m)
             hypotheses = self._hypothesis_gen.generate(
-                game_id, anomaly, segmentation, self._repo,
+                game_id, anomaly, segmentation, repo,
             )
             notify("hypothesis", "done", f"가설 {len(hypotheses.hypotheses)}개", metric=m)
 
             # ④ 데이터 검증
             current_step = "validation"
             notify("validation", "active", m, metric=m)
-            validation_results = self._validator.validate(
+            validation_results = validator.validate(
                 hypotheses, available_schema,
             )
             sup = sum(1 for v in validation_results if v.status == "supported")
