@@ -635,28 +635,42 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
         )
 
         for dim, values in seg.breakdown.items():
-            # 그룹 제목: 해당 차트 바로 위에 붙도록 margin-top 추가
+            # 그룹 제목
             st.markdown(
                 f"<div style='font-size:12px;color:#888;margin-top:16px;margin-bottom:6px;'>"
                 f"{dim}별 변화율</div>",
                 unsafe_allow_html=True,
             )
-            # LLM이 -18.0(=-18%) 또는 -0.18(비율) 둘 다 올 수 있음
-            display_map: dict[str, float] = {}
-            for seg_name, cv in values.items():
-                display_map[seg_name] = cv * 100 if abs(cv) <= 1 else cv
-            max_abs = max(abs(v) for v in display_map.values()) if display_map else 1
+            # 프롬프트에서 퍼센트 단위로 통일 → 그대로 표시
+            max_abs = max(abs(v) for v in values.values()) if values else 1
 
-            for seg_name, display_pct in display_map.items():
-                color = "red" if display_pct < 0 else "green"
-                pct = f"{display_pct:+.1f}%"
-                bar_width = abs(display_pct) / max_abs * 100
+            for seg_name, pct_val in values.items():
+                color = "#e74c3c" if pct_val < 0 else "#27ae60"
+                pct = f"{pct_val:+.1f}%"
+                bar_pct = abs(pct_val) / max_abs * 50  # 50% = 한쪽 최대폭
+                if pct_val < 0:
+                    # 음수: 가운데에서 왼쪽으로
+                    bar_html = (
+                        f"<div style='flex:1;display:flex;height:20px;'>"
+                        f"<div style='flex:1;display:flex;justify-content:flex-end;'>"
+                        f"<div style='width:{bar_pct * 2}%;height:100%;background:{color};border-radius:4px 0 0 4px;opacity:0.5;'></div></div>"
+                        f"<div style='width:1px;background:#ccc;'></div>"
+                        f"<div style='flex:1;'></div></div>"
+                    )
+                else:
+                    # 양수: 가운데에서 오른쪽으로
+                    bar_html = (
+                        f"<div style='flex:1;display:flex;height:20px;'>"
+                        f"<div style='flex:1;'></div>"
+                        f"<div style='width:1px;background:#ccc;'></div>"
+                        f"<div style='flex:1;display:flex;'>"
+                        f"<div style='width:{bar_pct * 2}%;height:100%;background:{color};border-radius:0 4px 4px 0;opacity:0.5;'></div></div></div>"
+                    )
                 st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:12px;margin:4px 0;'>"
+                    f"<div style='display:flex;align-items:center;gap:8px;margin:4px 0;'>"
                     f"<span style='width:80px;text-align:right;font-size:13px;color:#555;'>{seg_name}</span>"
-                    f"<div style='flex:1;height:20px;background:#eee;border-radius:4px;'>"
-                    f"<div style='width:{bar_width}%;height:100%;background:{color};border-radius:4px;opacity:0.5;'></div></div>"
-                    f"<span style='width:55px;font-size:13px;font-weight:600;color:{color};'>{pct}</span>"
+                    f"{bar_html}"
+                    f"<span style='width:60px;font-size:13px;font-weight:600;color:{color};'>{pct}</span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )

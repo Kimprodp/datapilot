@@ -53,7 +53,7 @@ class SegmentationReport(BaseModel):
         description="가장 집중된 세그먼트"
     )
     breakdown: dict[str, dict[str, float]] = Field(
-        description="전체 차원별 세그먼트 변화율"
+        description="전체 차원별 세그먼트 변화율. 퍼센트 단위 숫자로 반환 (예: -14.2는 -14.2% 의미)"
     )
     summary: str = Field(
         description="가설 발산 힌트가 되는 요약 문장"
@@ -97,7 +97,8 @@ USER_PROMPT_TEMPLATE = """\
 각 세그먼트의 변화율을 계산하고, \
 "집중된 차원과 값", "전체 분해 결과", \
 "가설 발산 힌트가 되는 요약 문장"을 반환하라.
-breakdown에는 변화율(%) 수치만 넣는다. raw 합산값이나 절대량은 포함하지 않는다.
+breakdown에는 변화율을 퍼센트 단위 숫자로 넣는다 (예: -14.2는 -14.2% 의미, 0.01 같은 소수 비율이 아님). \
+raw 합산값이나 절대량은 포함하지 않는다.
 summary에는 영문 코드명·괄호 표기를 제외하고 한글 지표명만 사용하라. \
 국가명은 한글로 표기한다 (예: brazil → 브라질). \
 플랫폼(Android, iOS)은 그대로 사용한다."""
