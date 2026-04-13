@@ -109,7 +109,9 @@ reasoning에 "연동 관계"를 명시한다. \
 출력 형식 규칙:
 - metric_label: 한글명 + 영문 코드. 예: "인앱결제 매출 (revenue)", "D7 리텐션 (d7_retention)"
 - change_display: 절대량 지표(매출, DAU 등)는 상대 변화율("-11%"), \
-비율 지표(리텐션, 성공률)는 "28% → 24% (-4%p)" 형태로 절대값 비교 + %p 변화량을 함께 표기한다
+비율 지표(리텐션, 성공률)는 "28% → 24% (-4%p)" 형태로 표기한다. \
+%p는 반드시 절대 차이(24-28=-4%p)로 계산한다. 상대 변화율(%)과 혼동하지 않는다.
+- change: 비율 지표는 절대 차이(0.24-0.28=-0.04)를 넣는다. 상대 변화율이 아님에 주의.
 - comparison_detail: 비교 구간 포함 상세. \
 예: "-11.1% (직전 4일 평균 351,200 -> 최근 4일 평균 312,400)"
 - severity: HIGH / MEDIUM / LOW 3단계만 사용
@@ -159,6 +161,7 @@ class BottleneckDetector:
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
+                temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

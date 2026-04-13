@@ -172,6 +172,7 @@ class RootCauseReasoner:
                 model=OPUS_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
+                temperature=0.5,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

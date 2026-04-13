@@ -227,6 +227,7 @@ class DataValidator:
             model=SONNET_MODEL,
             api_key=ANTHROPIC_API_KEY,
             max_tokens=MAX_TOKENS,
+            temperature=0.3,
         )
 
         # 동적으로 갱신되는 화이트리스트 (validate 호출 시 설정)
