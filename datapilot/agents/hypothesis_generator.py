@@ -57,7 +57,7 @@ class HypothesisList(BaseModel):
 
     anomaly: str = Field(description="대상 이상 지표명")
     hypotheses: list[Hypothesis] = Field(
-        default_factory=list, description="원인 가설 목록 (5~8개)"
+        default_factory=list, description="원인 가설 목록 (최대 5개)"
     )
 
 
@@ -99,7 +99,7 @@ USER_PROMPT_TEMPLATE = """\
 [가용 테이블 스키마]
 {available_schema_json}
 
-이 상황에서 가능한 원인 가설을 5~8개 발산하라. \
+이 상황에서 가장 유력한 원인 가설을 도출하라 (필요한 경우 최대 5개 까지만). \
 각 가설에 대해 "hypothesis", "reasoning", \
 "required_tables", "required_data"(가용 테이블 밖인 경우에만) \
 필드를 반드시 포함하라."""
@@ -154,7 +154,7 @@ class HypothesisGenerator:
             repo: 가용 스키마 조회용 Port.
 
         Returns:
-            HypothesisList — 5~8개 가설 목록.
+            HypothesisList — 최대 5개 가설 목록.
         """
         available_schema = repo.get_available_schema(game_id)
 
