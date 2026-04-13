@@ -251,7 +251,13 @@ _METRIC_DISPLAY: dict[str, str] = {
     "revenue": "인앱결제 매출",
     "dau": "DAU",
     "payment_success_rate": "결제 성공률",
+    "d1_retention": "D1 리텐션",
     "d7_retention": "D7 리텐션",
+    "arppu": "유저당 평균 결제액",
+    "new_installs": "신규 설치",
+    "sessions": "세션 수",
+    "avg_session_sec": "평균 세션 길이",
+    "mau": "MAU",
 }
 
 
@@ -357,8 +363,23 @@ def page_running() -> None:
             "margin-top:8px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
         )
         for metric in card_order:
-            steps = cards[metric]
             label = _METRIC_DISPLAY.get(metric, metric)
+
+            # 세부 분석 미지원 카드
+            if metric in unsupported_metrics:
+                html += (
+                    f"<div style='border:1.5px solid #e0e0e0;border-radius:8px;"
+                    f"margin-bottom:16px;padding:14px 16px;background:#fafafa;'>"
+                    f"<div style='display:flex;align-items:center;"
+                    f"justify-content:space-between;'>"
+                    f"<span style='font-size:14px;font-weight:600;color:#333;'>"
+                    f"{label}</span>"
+                    f"<span style='font-size:11px;color:#888;'>세부 분석 미지원</span>"
+                    f"</div></div>"
+                )
+                continue
+
+            steps = cards[metric]
 
             all_done = all(s[0] == "done" for s in steps.values())
             has_error = metric in card_errors
@@ -403,11 +424,19 @@ def page_running() -> None:
 
     # ── 콜백 ──
 
+    # 세부 분석 미지원 지표 추적
+    unsupported_metrics: set[str] = set()
+
     def on_step(step: PipelineStep) -> None:
         if step.agent == "bottleneck":
             detection["status"] = step.status
             detection["summary"] = step.summary
             render_detection()
+        elif step.agent == "unsupported":
+            unsupported_metrics.add(step.metric)
+            if step.metric not in card_order:
+                card_order.append(step.metric)
+            render_cards()
         else:
             m = step.metric
             if m not in cards:
