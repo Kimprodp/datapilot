@@ -29,7 +29,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
-from datapilot.config import ANTHROPIC_API_KEY, SONNET_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -79,22 +79,23 @@ SYSTEM_PROMPT = """\
 3. 모든 세그먼트가 고르게 영향받으면 → 확산형(spread)
 4. 두 차원이 교차하여 영향받는 경우(예: "신규 유저의 Android")도 포착한다.
 5. summary는 다음 형식을 따른다:
-   - 집중형: "{지표} 감소가 {세그먼트}에 집중 ({변화율}, {나머지}는 {수치}로 정상)"
+   - 집중형: "{{지표}} 감소가 {{세그먼트}}에 집중 ({{변화율}}, {{나머지}}는 {{수치}}로 정상)"
      예: "매출 감소가 Android에 집중 (-18%, iOS는 +0.2%로 정상)"
-   - 확산형: "{지표} 감소가 특정 세그먼트에 집중되지 않음 (전반적 하락)"
+   - 확산형: "{{지표}} 감소가 특정 세그먼트에 집중되지 않음 (전반적 하락)"
    구체적 수치를 반드시 포함한다.
 
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
 USER_PROMPT_TEMPLATE = """\
-다음은 게임 {game_id}의 이상 지표 "{metric}"에 대한 세그먼트별 raw 시계열이다.
+다음은 게임 {game_id}의 이상 지표 "{metric_label}"에 대한 세그먼트별 raw 시계열이다.
 
 {segmented_json}
 
 이 데이터에서 이상이 어떤 세그먼트에 집중되어 있는지 판단하라. \
 각 세그먼트의 변화율을 계산하고, \
 "집중된 차원과 값", "전체 분해 결과", \
-"가설 발산 힌트가 되는 요약 문장"을 반환하라."""
+"가설 발산 힌트가 되는 요약 문장"을 반환하라.
+summary에는 영문 코드명이 아닌 한글 지표명("{metric_label}")을 사용하라."""
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -120,6 +121,7 @@ class SegmentationAnalyzer:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
+                max_tokens=MAX_TOKENS,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
@@ -161,6 +163,6 @@ class SegmentationAnalyzer:
         # 3. LLM에게 집중 차원 식별 요청
         return self._chain.invoke({
             "game_id": game_id,
-            "metric": anomaly.metric,
+            "metric_label": anomaly.metric_label,
             "segmented_json": json.dumps(segmented, ensure_ascii=False),
         })

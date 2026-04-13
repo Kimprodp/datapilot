@@ -33,7 +33,10 @@ if not ANTHROPIC_API_KEY:
 # ──────────────────────────────────────────────────────────────────
 
 #: ①②⑥ — 수치 비교·분류 중심. Sonnet이면 충분.
-SONNET_MODEL = "claude-sonnet-4-5-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 #: ③⑤ — 깊은 인과 추론 필요. Opus 사용.
-OPUS_MODEL = "claude-opus-4-20250115"
+OPUS_MODEL = "claude-opus-4-6"
+
+#: tool calling 시 응답이 잘리지 않도록 충분한 토큰 확보
+MAX_TOKENS = 4096

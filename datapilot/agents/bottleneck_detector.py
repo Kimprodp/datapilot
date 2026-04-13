@@ -25,7 +25,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from datapilot.config import ANTHROPIC_API_KEY, SONNET_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -108,7 +108,8 @@ SYSTEM_PROMPT = """\
 - severity: HIGH / MEDIUM / LOW 3단계만 사용
 - reasoning: 다문장 상세 텍스트. 구조: 시점 명시 -> 변화 패턴 -> 다른 지표와의 대조
 
-출력은 반드시 지정된 JSON 스키마를 따른다."""
+중요: 분석 과정을 텍스트로 작성하지 말고, 즉시 도구(tool)를 호출해 결과를 반환하라. \
+모든 필드를 빠짐없이 채워야 한다."""
 
 USER_PROMPT_TEMPLATE = """\
 다음은 게임 {game_id}의 최근 {days}일 KPI 시계열이다.
@@ -150,6 +151,7 @@ class BottleneckDetector:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
+                max_tokens=MAX_TOKENS,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),

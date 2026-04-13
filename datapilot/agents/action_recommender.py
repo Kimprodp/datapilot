@@ -27,7 +27,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.root_cause_reasoner import RootCauseReport
-from datapilot.config import ANTHROPIC_API_KEY, SONNET_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 
 # ------------------------------------------------------------------
 # 출력 스키마 (Pydantic)
@@ -148,6 +148,7 @@ class ActionRecommender:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
+                max_tokens=MAX_TOKENS,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
