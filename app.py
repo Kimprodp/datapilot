@@ -127,7 +127,7 @@ def _extract_detail(comparison_detail: str) -> str:
     comparison_detail에서 괄호 안 내용만 추출한다.
     괄호가 없으면 원본을 그대로 반환.
     """
-    match = re.search(r"\((.+)\)\s*$", comparison_detail)
+    match = re.search(r"\(([^)]+)\)\s*$", comparison_detail)
     return match.group(1) if match else comparison_detail
 
 
@@ -634,6 +634,12 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
             unsafe_allow_html=True,
         )
 
+        # 전체 차원에서 최대 절대값 (모든 그룹 공통 기준)
+        global_max = max(
+            (abs(v) for vals in seg.breakdown.values() for v in vals.values()),
+            default=1,
+        )
+
         for dim, values in seg.breakdown.items():
             # 그룹 제목
             st.markdown(
@@ -641,8 +647,7 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
                 f"{dim}별 변화율</div>",
                 unsafe_allow_html=True,
             )
-            # 프롬프트에서 퍼센트 단위로 통일 → 그대로 표시
-            max_abs = max(abs(v) for v in values.values()) if values else 1
+            max_abs = global_max
 
             for seg_name, pct_val in values.items():
                 color = "#e74c3c" if pct_val < 0 else "#27ae60"
