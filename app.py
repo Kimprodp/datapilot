@@ -630,10 +630,16 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
                 f"{dim}별 변화율</div>",
                 unsafe_allow_html=True,
             )
-            for seg_name, change_val in values.items():
-                color = "red" if change_val < 0 else "green"
-                pct = f"{change_val:+.1%}" if abs(change_val) < 1 else f"{change_val:+.0%}"
-                bar_width = min(abs(change_val) * 500, 100)
+            # LLM이 -18.0(=-18%) 또는 -0.18(비율) 둘 다 올 수 있음
+            display_map: dict[str, float] = {}
+            for seg_name, cv in values.items():
+                display_map[seg_name] = cv * 100 if abs(cv) <= 1 else cv
+            max_abs = max(abs(v) for v in display_map.values()) if display_map else 1
+
+            for seg_name, display_pct in display_map.items():
+                color = "red" if display_pct < 0 else "green"
+                pct = f"{display_pct:+.1f}%"
+                bar_width = abs(display_pct) / max_abs * 100
                 st.markdown(
                     f"<div style='display:flex;align-items:center;gap:12px;margin:4px 0;'>"
                     f"<span style='width:80px;text-align:right;font-size:13px;color:#555;'>{seg_name}</span>"
