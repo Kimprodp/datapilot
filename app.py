@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from datapilot.demo import run_demo
 from datapilot.pipeline import (
     AnomalyAnalysis,
     PipelineOrchestrator,
@@ -20,6 +21,9 @@ from datapilot.pipeline import (
     UnanalyzedAnomaly,
 )
 from datapilot.repository.duckdb_adapter import DuckDBAdapter
+
+# True면 API 호출 없이 데모 데이터로 동작
+DEMO_MODE = True
 
 # ------------------------------------------------------------------
 # 페이지 설정
@@ -210,17 +214,21 @@ def page_start() -> None:
     # 분석 기간 ↔ 분석 시작 사이 여백
     st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
 
-    if st.button("분석 시작", type="primary", use_container_width=True):
+    def _on_start_click() -> None:
+        """on_click 콜백: 렌더링 전에 상태 전환 → page_start 재렌더 방지."""
         days = _PERIOD_OPTIONS[period_label]
         today = date(2026, 3, 31)  # Mock 데이터 기준일
-        period = (today - timedelta(days=days - 1), today)
-
+        p = (today - timedelta(days=days - 1), today)
         st.session_state.game_id = "pizza_ready"
         st.session_state.game_name = game
-        st.session_state.period = period
+        st.session_state.period = p
         st.session_state.period_label = period_label
         st.session_state.page = "running"
-        st.rerun()
+
+    st.button(
+        "분석 시작", type="primary", use_container_width=True,
+        on_click=_on_start_click,
+    )
 
 
 # ------------------------------------------------------------------
@@ -228,83 +236,209 @@ def page_start() -> None:
 # ------------------------------------------------------------------
 
 
-def _render_step(container, num: int, agent: str, status: str, summary: str) -> None:
-    """화면2 진행 스텝 1행. 와이어프레임 일치: 번호 원 + 이름 + 상태 텍스트."""
-    name = _AGENT_NAMES.get(agent, agent)
+# 화면 2 상수 ─────────────────────────────────────────────
 
-    # 상태별 스타일
+_STEP_AGENTS = ["segmentation", "hypothesis", "validation", "root_cause", "action"]
+_STEP_LABELS = {
+    "segmentation": "세그먼트",
+    "hypothesis": "가설",
+    "validation": "가설 검증",
+    "root_cause": "원인",
+    "action": "액션",
+}
+_METRIC_DISPLAY: dict[str, str] = {
+    "revenue": "인앱결제 매출",
+    "dau": "DAU",
+    "payment_success_rate": "결제 성공률",
+    "d7_retention": "D7 리텐션",
+}
+
+
+def _step_box_html(text: str, status: str) -> str:
+    """스텝 네모 1개 HTML. 와이어프레임 2-B-2 스타일."""
     styles = {
-        "done":   {"bg": "#d4edda", "fg": "#28a745", "icon": str(num), "status_fg": "#28a745", "row_bg": "#fff"},
-        "active": {"bg": "#e74c3c", "fg": "#fff",    "icon": str(num), "status_fg": "#e74c3c", "row_bg": "#fef9f9"},
-        "error":  {"bg": "#e74c3c", "fg": "#fff",    "icon": "✕",      "status_fg": "#e74c3c", "row_bg": "#fef2f2"},
-        "wait":   {"bg": "#eee",    "fg": "#999",    "icon": str(num), "status_fg": "#999",    "row_bg": "#fff"},
+        "done":   {"bg": "#d4edda", "fg": "#155724", "fw": "400"},
+        "active": {"bg": "#e74c3c", "fg": "#fff",    "fw": "600"},
+        "error":  {"bg": "#e74c3c", "fg": "#fff",    "fw": "600"},
+        "wait":   {"bg": "#eee",    "fg": "#999",    "fw": "400"},
     }
     s = styles.get(status, styles["wait"])
-
-    # 상태 텍스트
-    status_labels = {
-        "done": f"완료 — {summary}",
-        "active": "분석 중...",
-        "error": f"실패 — {summary}",
-        "wait": "대기",
-    }
-    status_text = status_labels.get(status, "대기")
-
-    # 이름 스타일
-    name_style = "font-weight:600;color:#e74c3c;" if status == "error" else "font-weight:500;"
-    status_weight = "font-weight:600;" if status in ("active", "error") else ""
-
-    row_bg = s["row_bg"]
-    icon_bg = s["bg"]
-    icon_fg = s["fg"]
-    icon_text = s["icon"]
-    st_fg = s["status_fg"]
-
-    container.markdown(
-        f"<div style='display:flex;align-items:center;gap:12px;padding:14px 16px;"
-        f"border-bottom:1px solid #f0f0f0;background:{row_bg};'>"
-        f"<div style='width:32px;height:32px;border-radius:50%;background:{icon_bg};color:{icon_fg};"
-        f"display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;"
-        f"flex-shrink:0;'>{icon_text}</div>"
-        f"<div style='flex:1;font-size:14px;{name_style}'>{name}</div>"
-        f"<div style='font-size:12px;color:{st_fg};{status_weight}'>{status_text}</div>"
-        f"</div>",
-        unsafe_allow_html=True,
+    return (
+        f"<div style='flex:1;text-align:center;padding:6px 0;"
+        f"background:{s['bg']};border-radius:4px;"
+        f"font-size:11px;color:{s['fg']};font-weight:{s['fw']};'>{text}</div>"
     )
+
+
+def _detection_banner_html(status: str, summary: str) -> str:
+    """이상 지표 탐지 배너. 와이어프레임 2-B-1 / 2-B-2."""
+    if status == "active":
+        return (
+            "<div style='display:flex;align-items:center;gap:10px;padding:16px;"
+            "background:#fef9f9;border:1.5px solid #e0e0e0;border-radius:8px;"
+            "margin-bottom:12px;'>"
+            "<div style='width:28px;height:28px;border-radius:50%;background:#e74c3c;"
+            "display:flex;align-items:center;justify-content:center;'>"
+            "<div style='width:10px;height:10px;border-radius:50%;background:#fff;'></div></div>"
+            "<div style='flex:1;'>"
+            "<div style='font-size:14px;font-weight:600;color:#333;'>이상 지표 탐지 중...</div>"
+            "<div style='font-size:12px;color:#888;margin-top:2px;'>"
+            "KPI 시계열을 분석하고 있습니다</div></div></div>"
+        )
+    if status == "done":
+        return (
+            "<div style='display:flex;align-items:center;gap:10px;padding:12px 16px;"
+            "background:#f0faf0;border:1.5px solid #d4edda;border-radius:8px;"
+            "margin-bottom:20px;'>"
+            "<div style='width:28px;height:28px;border-radius:50%;background:#d4edda;"
+            "color:#28a745;display:flex;align-items:center;justify-content:center;"
+            "font-size:14px;font-weight:700;'>✓</div>"
+            "<div style='flex:1;'>"
+            "<div style='font-size:14px;font-weight:600;color:#333;'>이상 지표 탐지 완료</div>"
+            f"<div style='font-size:12px;color:#666;margin-top:2px;'>{summary}</div>"
+            "</div></div>"
+        )
+    return ""
 
 
 def page_running() -> None:
     _app_header()
-    st.subheader(f"{st.session_state.game_name} ({st.session_state.period_label}) 분석 중...")
+    st.subheader(
+        f"{st.session_state.game_name} ({st.session_state.period_label}) 분석 중..."
+    )
 
-    step_containers = {}
-    for idx, agent_name in enumerate(_AGENT_ORDER, 1):
-        step_containers[agent_name] = st.empty()
-        _render_step(step_containers[agent_name], idx, agent_name, "wait", "대기")
-
-    elapsed_placeholder = st.empty()
-    error_placeholder = st.empty()
+    detection_ph = st.empty()
+    cards_ph = st.empty()
+    elapsed_ph = st.empty()
+    error_ph = st.empty()
+    # page_start의 stale 요소(분석 시작 버튼 등)가 DOM에 남지 않도록 빈 슬롯 추가
+    for _ in range(3):
+        st.empty()
     start_time = time.time()
 
-    last_status: dict[str, tuple[str, str]] = {}
+    # ── 상태 추적 ──
+    detection: dict[str, str] = {"status": "active", "summary": ""}
+    # metric → {agent: (status, summary)}
+    cards: dict[str, dict[str, tuple[str, str]]] = {}
+    card_order: list[str] = []
+    card_errors: dict[str, str] = {}
+    hyp_counts: dict[str, int] = {}
+
+    # ── 렌더링 함수 ──
+
+    def render_detection() -> None:
+        detection_ph.markdown(
+            _detection_banner_html(detection["status"], detection["summary"]),
+            unsafe_allow_html=True,
+        )
+
+    def _step_text(agent: str, status: str, summary: str, metric: str) -> str:
+        """스텝 네모 안에 들어갈 텍스트. screen-spec 2.3 규칙."""
+        if agent == "hypothesis" and status == "done":
+            match = re.search(r"(\d+)", summary)
+            if match:
+                hyp_counts[metric] = int(match.group(1))
+            return f"가설 {hyp_counts.get(metric, '')}개"
+        if agent == "validation" and status == "done":
+            n = hyp_counts.get(metric, "?")
+            return f"가설 검증 {n}/{n}"
+        if status == "error":
+            label = _STEP_LABELS.get(agent, agent)
+            return f"{label} 실패"
+        return _STEP_LABELS.get(agent, agent)
+
+    def render_cards() -> None:
+        if not cards:
+            cards_ph.empty()
+            return
+        html = (
+            "<div style='font-size:13px;font-weight:600;color:#888;"
+            "margin-top:8px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
+        )
+        for metric in card_order:
+            steps = cards[metric]
+            label = _METRIC_DISPLAY.get(metric, metric)
+
+            all_done = all(s[0] == "done" for s in steps.values())
+            has_error = metric in card_errors
+
+            # 카드 스타일 (실패만 빨간 테두리)
+            border = "#e74c3c" if has_error else "#e0e0e0"
+            bg = "#fef7f7" if has_error else "#fff"
+
+            # 헤더 우측 상태
+            if has_error:
+                st_html = ("<span style='font-size:11px;color:#e74c3c;"
+                           "font-weight:600;'>✕ 실패</span>")
+            elif all_done:
+                st_html = ("<span style='font-size:11px;color:#28a745;"
+                           "font-weight:600;'>✓ 완료</span>")
+            else:
+                st_html = "<span style='font-size:11px;color:#888;'>분석 중</span>"
+
+            html += (
+                f"<div style='border:1.5px solid {border};border-radius:8px;"
+                f"margin-bottom:16px;padding:14px 16px;background:{bg};'>"
+                f"<div style='display:flex;align-items:center;"
+                f"justify-content:space-between;margin-bottom:10px;'>"
+                f"<span style='font-size:14px;font-weight:600;color:#333;'>"
+                f"{label}</span>{st_html}</div>"
+                f"<div style='display:flex;gap:6px;'>"
+            )
+            for agent in _STEP_AGENTS:
+                s_status, s_summary = steps[agent]
+                text = _step_text(agent, s_status, s_summary, metric)
+                html += _step_box_html(text, s_status)
+            html += "</div>"
+
+            if has_error:
+                html += (
+                    f"<div style='font-size:12px;color:#e74c3c;margin-top:10px;'>"
+                    f"{card_errors[metric]}</div>"
+                )
+            html += "</div>"
+
+        cards_ph.markdown(html, unsafe_allow_html=True)
+
+    # ── 콜백 ──
 
     def on_step(step: PipelineStep) -> None:
-        last_status[step.agent] = (step.status, step.summary)
-        for step_idx, step_agent in enumerate(_AGENT_ORDER, 1):
-            if step_agent in last_status:
-                s, summ = last_status[step_agent]
-                _render_step(step_containers[step_agent], step_idx, step_agent, s, summ)
-        secs = time.time() - start_time
-        elapsed_placeholder.caption(_format_elapsed(secs))
+        if step.agent == "bottleneck":
+            detection["status"] = step.status
+            detection["summary"] = step.summary
+            render_detection()
+        else:
+            m = step.metric
+            if m not in cards:
+                cards[m] = {a: ("wait", "") for a in _STEP_AGENTS}
+                card_order.append(m)
+            cards[m][step.agent] = (step.status, step.summary)
+            if step.status == "error":
+                card_errors[m] = step.summary
+            render_cards()
+        elapsed_ph.markdown(
+            f"<div style='text-align:right;font-size:12px;"
+            f"color:#aaa;'>{_format_elapsed(time.time() - start_time)}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── 초기 렌더링 + 파이프라인 실행 ──
+    render_detection()
 
     try:
-        with DuckDBAdapter() as repo:
-            orchestrator = PipelineOrchestrator(repo)
-            report = orchestrator.run(
-                st.session_state.game_id,
+        if DEMO_MODE:
+            report = run_demo(
                 st.session_state.period,
                 on_step=on_step,
             )
+        else:
+            with DuckDBAdapter() as repo:
+                orchestrator = PipelineOrchestrator(repo)
+                report = orchestrator.run(
+                    st.session_state.game_id,
+                    st.session_state.period,
+                    on_step=on_step,
+                )
 
         st.session_state.report = report
         st.session_state.page = "report"
@@ -312,9 +446,12 @@ def page_running() -> None:
         st.rerun()
 
     except Exception as exc:
-        secs = time.time() - start_time
-        elapsed_placeholder.caption(_format_elapsed(secs))
-        with error_placeholder.container():
+        elapsed_ph.markdown(
+            f"<div style='text-align:right;font-size:12px;"
+            f"color:#aaa;'>{_format_elapsed(time.time() - start_time)}</div>",
+            unsafe_allow_html=True,
+        )
+        with error_ph.container():
             st.error(f"분석 중 오류가 발생했습니다: {exc}")
             col1, col2 = st.columns(2)
             with col1:
