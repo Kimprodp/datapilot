@@ -69,7 +69,7 @@ _AGENT_NAMES = {
 
 _AGENT_ORDER = ["bottleneck", "segmentation", "hypothesis", "validation", "root_cause", "action"]
 
-_SUPPORTED_DISPLAY = "매출 · DAU · 결제 성공률 · D7 리텐션"
+_SUPPORTED_DISPLAY = "매출 · DAU · 결제 성공률 · 리텐션"
 
 _VALIDATION_SORT = {"supported": 0, "rejected": 1, "unverified": 2}
 _PRIORITY_SORT = {"urgent": 0, "short_term": 1, "mid_term": 2}
@@ -109,6 +109,7 @@ def _severity_badge(severity: str) -> str:
 def _app_header() -> None:
     st.title("DataPilot")
     st.caption(_APP_SUBTITLE)
+    st.caption("현재 데모 버전으로, 가상의 게임 데이터를 기반으로 동작합니다. 분석에 약 10분이 소요됩니다.")
     st.divider()
 
 
@@ -241,11 +242,11 @@ def page_start() -> None:
 
 _STEP_AGENTS = ["segmentation", "hypothesis", "validation", "root_cause", "action"]
 _STEP_LABELS = {
-    "segmentation": "세그먼트",
-    "hypothesis": "가설",
+    "segmentation": "세그먼트 분석",
+    "hypothesis": "가설 발산",
     "validation": "가설 검증",
-    "root_cause": "원인",
-    "action": "액션",
+    "root_cause": "원인 추론",
+    "action": "액션 제안",
 }
 _METRIC_DISPLAY: dict[str, str] = {
     "revenue": "인앱결제 매출",
@@ -310,8 +311,13 @@ def _detection_banner_html(status: str, summary: str) -> str:
 
 def page_running() -> None:
     _app_header()
+    period = st.session_state.get("period")
+    if period:
+        date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
+    else:
+        date_range = st.session_state.period_label
     st.subheader(
-        f"{st.session_state.game_name} ({st.session_state.period_label}) 분석 중..."
+        f"{st.session_state.game_name} ({date_range}) 분석 중..."
     )
 
     detection_ph = st.empty()
