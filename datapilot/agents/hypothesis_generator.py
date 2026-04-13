@@ -134,6 +134,7 @@ class HypothesisGenerator:
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
                 temperature=0.5,
+                max_retries=3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT),
@@ -159,13 +160,21 @@ class HypothesisGenerator:
         Returns:
             HypothesisList — 최대 5개 가설 목록.
         """
-        available_schema = repo.get_available_schema(game_id)
+        full_schema = repo.get_available_schema(game_id)
+        # 가설 생성에는 테이블명 + 설명만 전달 (토큰 절감)
+        # 컬럼 상세는 ④ Data Validator가 SQL 작성 시 사용
+        light_schema = {
+            "tables": [
+                {"name": t["name"], "description": t.get("description", "")}
+                for t in full_schema["tables"]
+            ]
+        }
 
         return self._chain.invoke({
             "game_id": game_id,
             "anomaly_json": anomaly.model_dump_json(),
             "segmentation_json": segmentation.model_dump_json(),
             "available_schema_json": json.dumps(
-                available_schema, ensure_ascii=False,
+                light_schema, ensure_ascii=False,
             ),
         })
