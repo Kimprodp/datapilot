@@ -91,11 +91,12 @@ def _badge_html(text: str, bg: str, fg: str) -> str:
 
 
 def _card_header(title: str, agent_label: str) -> str:
-    """와이어프레임 detail-header: 회색 배경 + 하단 구분선."""
+    """와이어프레임 detail-header: 회색 배경 + 테두리 포함."""
     return (
         f"<div style='display:flex;align-items:center;justify-content:space-between;"
         f"padding:12px 16px;background:#f8f8f8;"
-        f"margin:-1rem -1rem 12px;border-bottom:1px solid #e0e0e0;"
+        f"margin:-1rem -1rem 12px;"
+        f"border:1px solid #e0e0e0;border-bottom:1px solid #e0e0e0;"
         f"border-radius:6px 6px 0 0;'>"
         f"<span style='font-size:14px;font-weight:600;'>{title}</span>"
         f"<span style='font-size:11px;color:#999;'>{agent_label}</span>"
@@ -142,20 +143,23 @@ def _render_anomaly_summary(anomaly_item) -> None:
         change_text = a.change_display.replace("->", "→").replace("- >", "→")
         detail_text = _extract_detail(a.comparison_detail).replace("->", "→").replace("- >", "→")
         rows = [
-            ("지표", f"<strong>{_korean_label(a.metric_label)}</strong>"),
-            ("변화율", f"<span style='color:#e74c3c;'>{change_text}</span>"
-                       f"<br><span style='font-size:13px;color:#888;'>{detail_text}</span>"),
-            ("심각도", f"<strong>{a.severity}</strong>"),
+            ("지표", f"{_korean_label(a.metric_label)}"),
+            ("변화율", f"<span style='font-size:16px;font-weight:700;color:#e74c3c;'>{change_text}</span>"
+                       f"<br><span style='font-size:13px;color:#888;font-weight:400;'>{detail_text}</span>"),
+            ("심각도", f"{a.severity}"),
             ("판정 근거", f"<span style='font-weight:400;'>{a.reasoning}</span>"),
         ]
-        for label, value in rows:
+        for i, (label, value) in enumerate(rows):
+            is_last = i == len(rows) - 1
+            border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
             st.markdown(
-                f"<div style='padding:10px 0;border-bottom:1px solid #f0f0f0;'>"
+                f"<div style='padding:10px 0;{border}'>"
                 f"<div style='font-size:12px;color:#999;margin-bottom:3px;'>{label}</div>"
-                f"<div style='font-size:13px;font-weight:600;line-height:1.5;'>{value}</div>"
+                f"<div style='font-size:14px;font-weight:500;line-height:1.5;'>{value}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
@@ -487,24 +491,56 @@ def _korean_label(metric_label: str) -> str:
     return metric_label.split(" (")[0] if " (" in metric_label else metric_label
 
 
-def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]], selected_idx: int) -> None:
-    """상단 이상 요약 카드 행 (와이어프레임: 가로 카드 + 클릭 선택).
+def _render_anomaly_cards(
+    items: list[tuple[str, AnomalyAnalysis | UnanalyzedAnomaly]],
+    selected_idx: int,
+) -> None:
+    """상단 이상 요약 카드. position:absolute 오버레이로 카드 전체 클릭 가능."""
+    # 카드 오버레이 CSS
+    st.markdown("""<style>
+        /* 카드 컨테이너를 position 기준으로 설정 */
+        div[data-testid='stColumn'] > div[data-testid='stVerticalBlock'] {
+            position: relative !important;
+        }
+        /* 버튼의 stElementContainer를 카드 전체 위로 덮기 */
+        div[data-testid='stColumn'] div[data-testid='stElementContainer']:has(button) {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 10 !important;
+        }
+        div[data-testid='stColumn'] .stButton,
+        div[data-testid='stColumn'] button[data-testid*='stBaseButton'] {
+            width: 100% !important;
+            height: 100% !important;
+            opacity: 0 !important;
+            cursor: pointer !important;
+            border: none !important;
+            background: transparent !important;
+        }
+        /* CSS-only 컨테이너 높이 제거 (타이틀~카드 간격 축소) */
+        div[data-testid='stElementContainer']:has(style) {
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+        }
+        /* 타이틀~카드 간격 축소 */
+        div[data-testid='stHorizontalBlock'] {
+            margin-top: -8px !important;
+        }
+        /* 새 분석 시작 버튼 높이 (화면1과 통일) */
+        button[data-testid='stBaseButton-primary'] {
+            min-height: 52px !important;
+            font-size: 15px !important;
+        }
+    </style>""", unsafe_allow_html=True)
 
-    카드 HTML 위에 투명 버튼을 겹쳐서 카드 자체를 클릭 가능하게 만든다.
-    """
-    # 투명 버튼을 카드 위로 겹치는 CSS
-    st.markdown(
-        "<style>"
-        "div[data-testid='column'] .card-overlay {"
-        "  position:relative; margin-top:-90px; height:86px; z-index:1;"
-        "}"
-        "div[data-testid='column'] .card-overlay .stButton > button {"
-        "  opacity:0 !important; width:100% !important; height:86px !important;"
-        "  cursor:pointer !important; border:none !important;"
-        "}"
-        "</style>",
-        unsafe_allow_html=True,
-    )
+    def _on_card_click(idx: int) -> None:
+        st.session_state.selected_anomaly_idx = idx
 
     cols = st.columns(len(items))
     for idx, (col, (metric, data)) in enumerate(zip(cols, items)):
@@ -513,10 +549,7 @@ def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAno
             is_selected = idx == selected_idx
             is_nonseg = isinstance(data, UnanalyzedAnomaly)
 
-            # 선택 상태별 스타일
-            if is_selected and is_nonseg:
-                border, bg = "#999", "#f8f8f8"
-            elif is_selected:
+            if is_selected:
                 border, bg = "#e74c3c", "#fef7f7"
             else:
                 border, bg = "#e0e0e0", "#fafafa"
@@ -537,12 +570,10 @@ def _render_anomaly_cards(items: list[tuple[str, AnomalyAnalysis | UnanalyzedAno
                 unsafe_allow_html=True,
             )
 
-            # 투명 버튼을 카드 위에 겹침 (클릭 핸들러)
-            st.markdown('<div class="card-overlay">', unsafe_allow_html=True)
-            if st.button(" ", key=f"card_{idx}", use_container_width=True):
-                st.session_state.selected_anomaly_idx = idx
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.button(
+                " ", key=f"card_{idx}", use_container_width=True,
+                on_click=_on_card_click, args=(idx,),
+            )
 
 
 def page_report() -> None:
@@ -569,7 +600,10 @@ def page_report() -> None:
     # 상단 카드 행
     _render_anomaly_cards(items, selected_idx)
 
-    st.divider()
+    st.markdown(
+        "<hr style='margin:20px 0 20px;border:none;border-top:1px solid #e0e0e0;'>",
+        unsafe_allow_html=True,
+    )
 
     # 선택된 카드의 상세 렌더링
     _, selected_data = items[selected_idx]
@@ -578,23 +612,12 @@ def page_report() -> None:
     elif isinstance(selected_data, UnanalyzedAnomaly):
         _render_unanalyzed(selected_data)
 
-    st.divider()
-    # 새 분석 시작 버튼 (세로 높이 확대 — start-btn CSS 재사용)
-    st.markdown(
-        "<style>"
-        ".start-btn .stButton > button[kind='primary'] {"
-        "  padding-top:16px !important; padding-bottom:16px !important;"
-        "  font-size:16px !important;"
-        "}"
-        "</style>",
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div class="start-btn">', unsafe_allow_html=True)
+    # 새 분석 시작 버튼 (구분선 없음, 높이는 상단 CSS에서 처리)
+    st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
     if st.button("새 분석 시작", type="primary", use_container_width=True):
         st.session_state.page = "start"
         st.session_state.pop("selected_anomaly_idx", None)
         st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------
@@ -629,6 +652,7 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
 def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
@@ -639,14 +663,16 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
             analysis.validation_results,
             key=lambda vr: _VALIDATION_SORT.get(vr.status, 3),
         )
-        for vr in sorted_results:
+        for vi, vr in enumerate(sorted_results):
             vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
             badge = _badge_html(vr_label, bg, fg)
             ev_color = "#555" if vr.status == "supported" else "#888"
             ev_text = vr.evidence or vr.required_data or ""
+            is_last = vi == len(sorted_results) - 1
+            border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
             st.markdown(
                 f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
-                f"border-bottom:1px solid #f0f0f0;'>"
+                f"{border}'>"
                 f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
                 f"<div>"
                 f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
@@ -654,6 +680,7 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
                 f"</div></div>",
                 unsafe_allow_html=True,
             )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
 def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
@@ -702,6 +729,7 @@ def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
                 f"추가 검토 필요</div>{items_html}</div>",
                 unsafe_allow_html=True,
             )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
 def _render_action_card(analysis: AnomalyAnalysis) -> None:
@@ -712,12 +740,15 @@ def _render_action_card(analysis: AnomalyAnalysis) -> None:
             analysis.action_plan.actions,
             key=lambda a: _PRIORITY_SORT.get(a.priority, 3),
         )
-        for action in sorted_actions:
+        has_note = bool(analysis.action_plan.note)
+        for ai, action in enumerate(sorted_actions):
             action_label, bg, fg = _PRIORITY_BADGE.get(action.priority, ("?", "#eee", "#333"))
             badge = _badge_html(action_label, bg, fg)
+            is_last = ai == len(sorted_actions) - 1 and not has_note
+            border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
             st.markdown(
                 f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
-                f"border-bottom:1px solid #f0f0f0;'>"
+                f"{border}'>"
                 f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
                 f"<div>"
                 f"<div style='font-size:14px;font-weight:600;'>{action.title}</div>"
@@ -728,11 +759,14 @@ def _render_action_card(analysis: AnomalyAnalysis) -> None:
             )
         if analysis.action_plan.note:
             st.markdown(
-                "<div style='font-size:14px;font-weight:600;color:#555;"
-                "margin-top:12px;margin-bottom:4px;'>참고</div>",
+                f"<div style='margin-top:12px;padding:12px 16px;background:#f0f4ff;"
+                f"border-left:3px solid #4a8af4;border-radius:6px;'>"
+                f"<div style='font-size:13px;font-weight:600;color:#555;margin-bottom:4px;'>참고</div>"
+                f"<div style='font-size:14px;color:#333;line-height:1.5;'>"
+                f"{analysis.action_plan.note}</div></div>",
                 unsafe_allow_html=True,
             )
-            st.info(analysis.action_plan.note)
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
 def _render_analyzed(analysis: AnomalyAnalysis) -> None:
