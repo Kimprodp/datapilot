@@ -547,7 +547,10 @@ def _render_anomaly_cards(
 
             sev_bg, sev_fg = _SEVERITY_COLORS.get(anomaly.severity, ("#e2e3e5", "#383d41"))
             korean_name = _korean_label(anomaly.metric_label)
-            change_text = anomaly.change_display.replace("->", "→").replace("- >", "→")
+            raw_change = anomaly.change_display.replace("->", "→").replace("- >", "→")
+            # 상단 카드: 비율 지표의 "98.1% → 92.4% (-5.7%p)" → "-5.7%p" 만 표시
+            paren = re.search(r"\(([^)]+%p)\)", raw_change)
+            change_text = paren.group(1) if paren else raw_change
 
             st.markdown(
                 f"<div style='border:1.5px solid {border};background:{bg};padding:12px;"
@@ -570,8 +573,13 @@ def _render_anomaly_cards(
 def page_report() -> None:
     report: PipelineReport = st.session_state.report
     _app_header()
+    period = st.session_state.get("period")
+    if period:
+        date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
+    else:
+        date_range = st.session_state.period_label
     st.subheader(
-        f"분석 완료 — {st.session_state.game_name} ({st.session_state.period_label})"
+        f"분석 완료 — {st.session_state.game_name} ({date_range})"
     )
 
     if not report.analyzed and not report.unanalyzed:
@@ -621,7 +629,10 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
     seg = analysis.segmentation
     with st.container(border=True):
         st.markdown(_card_header("세그먼트 분해", "② 세그먼트 분석"), unsafe_allow_html=True)
-        st.markdown(f":red[{seg.summary}]")
+        st.markdown(
+            f"<div style='color:#e74c3c;font-size:14px;line-height:1.6;'>{seg.summary}</div>",
+            unsafe_allow_html=True,
+        )
 
         for dim, values in seg.breakdown.items():
             # 그룹 제목: 해당 차트 바로 위에 붙도록 margin-top 추가
@@ -664,7 +675,9 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
             vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
             badge = _badge_html(vr_label, bg, fg)
             ev_color = "#555" if vr.status == "supported" else "#888"
-            ev_text = vr.evidence or vr.required_data or ""
+            ev_raw = vr.evidence or vr.required_data or ""
+            # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
+            ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
             is_last = vi == len(sorted_results) - 1
             border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
             st.markdown(
@@ -712,7 +725,8 @@ def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.warning(f"원인 불명 — {rc.root_cause.summary}")
+            summary_text = rc.root_cause.summary.replace("원인 불명", "").strip(" —\n")
+            st.warning(f"원인 불명 — {summary_text}" if summary_text else "원인 불명")
 
         if rc.additional_investigation:
             items_html = "".join(
