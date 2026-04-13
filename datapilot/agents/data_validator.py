@@ -163,7 +163,8 @@ SYSTEM_PROMPT = """\
 1. execute_sql 도구를 사용해 필요한 SQL을 실행할 수 있다. \
 SELECT만 허용되며, 주어진 가용 테이블 안에서만 조회한다.
 2. 여러 가설에 같은 테이블 데이터가 필요하면 SQL 결과를 공유한다. \
-동일 쿼리를 반복 실행하지 않는다.
+동일 쿼리를 반복 실행하지 않는다. \
+가능하면 1회 SQL로 여러 가설을 동시에 검증할 수 있는 쿼리를 작성한다.
 3. SQL 실행 결과를 근거로 각 가설이 데이터에 의해 \
 지지되는가(supported), 반박되는가(rejected)를 판정한다.
 4. 판정 근거는 핵심 수치 1~2개만 인용해 1~2문장으로 간결하게 명시한다. \
@@ -374,10 +375,21 @@ class DataValidator:
             for i, h in enumerate(hypotheses)
         )
 
+        # 가설이 참조하는 테이블만 스키마 전달 (토큰 절감)
+        needed_tables = set()
+        for h in hypotheses:
+            needed_tables.update(h.required_tables)
+        filtered_schema = {
+            "tables": [
+                t for t in available_schema["tables"]
+                if t["name"] in needed_tables
+            ]
+        }
+
         user_content = USER_PROMPT_TEMPLATE.format(
             hypotheses_text=hypotheses_text,
             available_schema_json=json.dumps(
-                available_schema, ensure_ascii=False,
+                filtered_schema, ensure_ascii=False,
             ),
         )
         messages: list[Any] = [

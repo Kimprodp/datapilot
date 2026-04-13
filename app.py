@@ -437,15 +437,10 @@ def page_running() -> None:
         if step.agent == "bottleneck":
             detection["status"] = step.status
             detection["summary"] = step.summary
-            # "이상 지표 5개 발견 (결제 성공률 감소, ...)" → metric별 방향 파싱
-            if step.status == "done" and "(" in step.summary:
-                inside = step.summary.split("(", 1)[1].rstrip(")")
-                for item in inside.split(","):
-                    item = item.strip()
-                    for code, display in _METRIC_DISPLAY.items():
-                        if display in item:
-                            metric_direction[code] = "증가" if "증가" in item else "감소"
             render_detection()
+        elif step.agent == "direction":
+            metric_direction[step.metric] = step.summary
+            return  # UI 렌더링 불필요
         elif step.agent == "unsupported":
             unsupported_metrics.add(step.metric)
             if step.metric not in card_order:

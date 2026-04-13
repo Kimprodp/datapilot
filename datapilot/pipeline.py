@@ -161,6 +161,10 @@ class PipelineOrchestrator:
             for l, a in zip(labels, anomaly_report.anomalies)
         ]
         _notify("bottleneck", "done", f"이상 지표 {n}개 발견 ({', '.join(direction)})")
+        # 각 이상 지표의 방향을 metric 코드 기준으로 전달
+        for a in anomaly_report.anomalies:
+            _notify("direction", "info",
+                    "증가" if a.change > 0 else "감소", metric=a.metric)
 
         # ── 분류: segmentable / non-segmentable ───────────────
         segmentable: list[AnomalyItem] = []

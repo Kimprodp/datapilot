@@ -35,6 +35,9 @@ if not ANTHROPIC_API_KEY:
 #: ①②⑥ — 수치 비교·분류 중심. Sonnet이면 충분.
 SONNET_MODEL = "claude-sonnet-4-6"
 
+#: ④ — SQL 생성 + 결과 비교. 깊은 추론 불필요, 속도 우선.
+HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
 #: ③⑤ — 깊은 인과 추론 필요. Opus 사용.
 OPUS_MODEL = "claude-opus-4-6"
 
