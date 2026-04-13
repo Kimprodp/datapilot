@@ -12,7 +12,6 @@ from datetime import date, timedelta
 
 import streamlit as st
 
-from datapilot.demo import run_demo
 from datapilot.pipeline import (
     AnomalyAnalysis,
     PipelineOrchestrator,
@@ -22,8 +21,6 @@ from datapilot.pipeline import (
 )
 from datapilot.repository.duckdb_adapter import DuckDBAdapter
 
-# True면 API 호출 없이 데모 데이터로 동작
-DEMO_MODE = True
 
 # ------------------------------------------------------------------
 # 페이지 설정
@@ -430,19 +427,13 @@ def page_running() -> None:
     render_detection()
 
     try:
-        if DEMO_MODE:
-            report = run_demo(
+        with DuckDBAdapter() as repo:
+            orchestrator = PipelineOrchestrator(repo)
+            report = orchestrator.run(
+                st.session_state.game_id,
                 st.session_state.period,
                 on_step=on_step,
             )
-        else:
-            with DuckDBAdapter() as repo:
-                orchestrator = PipelineOrchestrator(repo)
-                report = orchestrator.run(
-                    st.session_state.game_id,
-                    st.session_state.period,
-                    on_step=on_step,
-                )
 
         st.session_state.report = report
         st.session_state.page = "report"
