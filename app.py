@@ -502,18 +502,18 @@ def page_running() -> None:
     # ── 초기 렌더링 + 파이프라인 실행 ──
     render_detection()
 
-    try:
+    def _run_pipeline() -> PipelineReport:
         if st.session_state.get("is_demo", False):
-            report = run_demo(on_step=on_step)
-        else:
-            with DuckDBAdapter() as repo:
-                orchestrator = PipelineOrchestrator(repo)
-                report = orchestrator.run(
-                    st.session_state.game_id,
-                    st.session_state.period,
-                    on_step=on_step,
-                )
+            return run_demo(on_step=on_step)
+        with DuckDBAdapter() as repo:
+            return PipelineOrchestrator(repo).run(
+                st.session_state.game_id,
+                st.session_state.period,
+                on_step=on_step,
+            )
 
+    try:
+        report = _run_pipeline()
         st.session_state.report = report
         st.session_state.page = "report"
         time.sleep(0.5)

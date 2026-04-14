@@ -23,7 +23,6 @@ from datapilot.agents.root_cause_reasoner import (
     CausalStep,
     RootCause,
     RootCauseReport,
-    UnverifiedHypothesis,
 )
 from datapilot.agents.segmentation_analyzer import (
     SegmentConcentration,
@@ -695,62 +694,6 @@ def build_demo_report() -> PipelineReport:
 # ------------------------------------------------------------------
 
 
-class DemoPipeline:
-    """실제 파이프라인 진행 콜백을 재현하는 데모 파이프라인.
-
-    고정된 백업 결과를 반환하므로 ``game_id`` / ``period`` 인자는 받지 않는다.
-    실제 ``PipelineOrchestrator.run()`` 이 발화하는 콜백 순서·메타는 그대로 재현한다:
-
-        bottleneck active → bottleneck done (요약)
-        direction info × N (각 이상 지표 방향)
-        unsupported done × K (미지원 지표 선표시)
-        [segmentable 지표 각각]
-            segmentation active → done
-            hypothesis active → done (가설 N개)
-            validation active → done (확인 S / 기각 R / 미검증 U)
-            root_cause active → done
-            action active → done (액션 N개)
-    """
-
-    def run(
-        self,
-        *,
-        on_step: OnStepCallback = None,
-    ) -> PipelineReport:
-        report = build_demo_report()
-
-        # ── ① 병목 탐지 ─────────────────────────────────────
-        _notify(on_step, "bottleneck", "active")
-        time.sleep(_BOTTLENECK_ACTIVE_SEC)
-
-        labels_with_direction: list[str] = []
-        for metric in report.anomaly_order:
-            label, direction = _lookup_label_and_direction(report, metric)
-            labels_with_direction.append(f"{label} {direction}")
-
-        n = len(report.anomaly_order)
-        summary = f"이상 지표 {n}개 발견 ({', '.join(labels_with_direction)})"
-        _notify(on_step, "bottleneck", "done", summary)
-
-        # 각 이상 지표의 방향 정보 전달 (카드 라벨 suffix용)
-        for metric in report.anomaly_order:
-            _, direction = _lookup_label_and_direction(report, metric)
-            _notify(on_step, "direction", "info", direction, metric=metric)
-
-        # ── 미지원 지표 먼저 알림 ──────────────────────────
-        for ua in report.unanalyzed:
-            _notify(
-                on_step, "unsupported", "done",
-                "세부 분석 미지원", metric=ua.anomaly.metric,
-            )
-
-        # ── segmentable 지표 ②~⑥ 시뮬레이션 ───────────────
-        for analysis in report.analyzed:
-            _simulate_analyze_one(on_step, analysis)
-
-        return report
-
-
 def _lookup_label_and_direction(
     report: PipelineReport,
     metric: str,
@@ -799,5 +742,49 @@ def run_demo(
     *,
     on_step: OnStepCallback = None,
 ) -> PipelineReport:
-    """데모 파이프라인 1회 실행 (편의 함수)."""
-    return DemoPipeline().run(on_step=on_step)
+    """데모 파이프라인을 실행한다.
+
+    실제 ``PipelineOrchestrator.run()`` 이 발화하는 콜백 순서·메타를 그대로 재현한다:
+
+        bottleneck active → bottleneck done (요약)
+        direction info × N (각 이상 지표 방향)
+        unsupported done × K (미지원 지표 선표시)
+        [segmentable 지표 각각]
+            segmentation active → done
+            hypothesis active → done (가설 N개)
+            validation active → done (확인 S / 기각 R / 미검증 U)
+            root_cause active → done
+            action active → done (액션 N개)
+    """
+    report = build_demo_report()
+
+    # ── ① 병목 탐지 ─────────────────────────────────────
+    _notify(on_step, "bottleneck", "active")
+    time.sleep(_BOTTLENECK_ACTIVE_SEC)
+
+    labels_with_direction: list[str] = []
+    for metric in report.anomaly_order:
+        label, direction = _lookup_label_and_direction(report, metric)
+        labels_with_direction.append(f"{label} {direction}")
+
+    n = len(report.anomaly_order)
+    summary = f"이상 지표 {n}개 발견 ({', '.join(labels_with_direction)})"
+    _notify(on_step, "bottleneck", "done", summary)
+
+    # 각 이상 지표의 방향 정보 전달 (카드 라벨 suffix용)
+    for metric in report.anomaly_order:
+        _, direction = _lookup_label_and_direction(report, metric)
+        _notify(on_step, "direction", "info", direction, metric=metric)
+
+    # ── 미지원 지표 먼저 알림 ──────────────────────────
+    for ua in report.unanalyzed:
+        _notify(
+            on_step, "unsupported", "done",
+            "세부 분석 미지원", metric=ua.anomaly.metric,
+        )
+
+    # ── segmentable 지표 ②~⑥ 시뮬레이션 ───────────────
+    for analysis in report.analyzed:
+        _simulate_analyze_one(on_step, analysis)
+
+    return report
