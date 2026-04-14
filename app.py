@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from datapilot.demo import run_demo
 from datapilot.pipeline import (
     AnomalyAnalysis,
     PipelineOrchestrator,
@@ -117,6 +118,19 @@ def _app_header() -> None:
     )
 
 
+def _demo_badge() -> None:
+    """데모 모드일 때 상단에 노출되는 배지."""
+    if not st.session_state.get("is_demo", False):
+        return
+    st.markdown(
+        "<div style='padding:10px 14px;background:#fff8e1;border:1px solid #ffd966;"
+        "border-radius:6px;margin-bottom:14px;font-size:13px;color:#7a5c00;'>"
+        "🎬 <strong>데모 모드</strong> — 사전 저장된 분석 결과를 재생합니다. "
+        "실제 API 호출은 발생하지 않습니다.</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _format_elapsed(seconds: float) -> str:
     return f"경과 시간: {int(seconds // 60)}분 {int(seconds % 60)}초"
 
@@ -201,8 +215,9 @@ def page_start() -> None:
             display: flex !important;
             align-items: center !important;
         }
-        /* 분석 시작 버튼 */
-        button[data-testid='stBaseButton-primary'] {
+        /* 분석 시작 / 데모 버튼 */
+        button[data-testid='stBaseButton-primary'],
+        button[data-testid='stBaseButton-secondary'] {
             min-height: 52px !important;
             font-size: 15px !important;
         }
@@ -220,7 +235,7 @@ def page_start() -> None:
     # 분석 기간 ↔ 분석 시작 사이 여백
     st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
 
-    def _on_start_click() -> None:
+    def _on_start_click(is_demo: bool = False) -> None:
         """on_click 콜백: 렌더링 전에 상태 전환 → page_start 재렌더 방지."""
         days = _PERIOD_OPTIONS[period_label]
         today = date(2026, 3, 31)  # Mock 데이터 기준일
@@ -229,11 +244,23 @@ def page_start() -> None:
         st.session_state.game_name = game
         st.session_state.period = p
         st.session_state.period_label = period_label
+        st.session_state.is_demo = is_demo
         st.session_state.page = "running"
 
     st.button(
         "분석 시작", type="primary", use_container_width=True,
-        on_click=_on_start_click,
+        on_click=_on_start_click, args=(False,),
+        help=(
+            "실제 API를 호출해 AI가 이상 지표를 탐색하고 데이터 분석을 시작합니다.  \n"
+            "이상 지표 수에 따라 약 10분 정도 소요될 수 있으며, "
+            "API 사용 한도에 도달한 경우 에러가 발생할 수 있습니다."
+        ),
+    )
+    st.markdown("<div style='margin-top:6px;'></div>", unsafe_allow_html=True)
+    st.button(
+        "⚡ 데모 결과 빠르게 보기", use_container_width=True,
+        on_click=_on_start_click, args=(True,),
+        help="실제 API 호출 없이 사전 저장된 분석 결과를 약 30초에 걸쳐 확인할 수 있습니다.",
     )
 
 
@@ -315,6 +342,7 @@ def _detection_banner_html(status: str, summary: str) -> str:
 
 def page_running() -> None:
     _app_header()
+    _demo_badge()
     period = st.session_state.get("period")
     if period:
         date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
@@ -475,13 +503,16 @@ def page_running() -> None:
     render_detection()
 
     try:
-        with DuckDBAdapter() as repo:
-            orchestrator = PipelineOrchestrator(repo)
-            report = orchestrator.run(
-                st.session_state.game_id,
-                st.session_state.period,
-                on_step=on_step,
-            )
+        if st.session_state.get("is_demo", False):
+            report = run_demo(on_step=on_step)
+        else:
+            with DuckDBAdapter() as repo:
+                orchestrator = PipelineOrchestrator(repo)
+                report = orchestrator.run(
+                    st.session_state.game_id,
+                    st.session_state.period,
+                    on_step=on_step,
+                )
 
         st.session_state.report = report
         st.session_state.page = "report"
@@ -586,7 +617,6 @@ def _render_anomaly_cards(
         with col:
             anomaly = data.anomaly
             is_selected = idx == selected_idx
-            is_nonseg = isinstance(data, UnanalyzedAnomaly)
 
             if is_selected:
                 border, bg = "#e74c3c", "#fef7f7"
@@ -621,6 +651,7 @@ def _render_anomaly_cards(
 def page_report() -> None:
     report: PipelineReport = st.session_state.report
     _app_header()
+    _demo_badge()
     period = st.session_state.get("period")
     if period:
         date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
