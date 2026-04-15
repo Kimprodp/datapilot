@@ -44,7 +44,7 @@ from datapilot.repository.port import GameDataRepository
 # ──────────────────────────────────────────────────────────────────
 
 #: 에이전트 루프 최대 라운드 (무한 루프 방어)
-MAX_TOOL_ROUNDS = 5
+MAX_TOOL_ROUNDS = 7
 
 _DANGEROUS_PATTERN = re.compile(
     r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|CREATE"
