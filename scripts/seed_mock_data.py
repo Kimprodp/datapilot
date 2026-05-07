@@ -3,7 +3,9 @@ Mock 데이터 생성 스크립트
 
 DuckDB 파일(data/datapilot_mock.db)에 12개 테이블을 생성하고
 Pizza Ready 30일치 Mock 데이터를 삽입한다.
-3개 이상 시나리오가 매립되어 있다.
+2개 시나리오가 매립되어 있다:
+- Android UI 변경 (3/28) → 인앱결제 매출 ↓
+- PG 장애 PagSeguro (3/31) → 결제 성공률 ↓
 
 실행: uv run python scripts/seed_mock_data.py
 """
@@ -22,7 +24,6 @@ START_DATE = BASE_DATE - timedelta(days=PERIOD_DAYS - 1)  # 2026-03-02
 
 # 시나리오 핵심 시점
 UI_CHANGE_DATE = BASE_DATE - timedelta(days=3)     # D-3: Android UI 변경 (2026-03-28)
-EVENT_END_DATE = BASE_DATE - timedelta(days=14)    # D-14: 시즌 이벤트 종료 (2026-03-17)
 PG_OUTAGE_DATE = BASE_DATE                         # D-0: PG 장애 (2026-03-31)
 
 # 상품 가격 매핑 (원)
@@ -205,14 +206,10 @@ def seed_users(conn: duckdb.DuckDBPyConnection):
 
     users = []
     for i in range(NUM_USERS):
-        # new = 최근 7일 이내 설치, existing = 그 이전
-        is_new = random.random() < 0.3  # 30% 확률로 new
-        if is_new:
-            install = BASE_DATE - timedelta(days=random.randint(0, 6))
-            user_type = "new"
-        else:
-            install = BASE_DATE - timedelta(days=random.randint(7, 90))
-            user_type = "existing"
+        # install_date 를 90일 균등 분포로 → new_installs 일별 안정 (~33명/일)
+        # user_type 은 install_date 기반 자동 결정 (7일 이내 = new)
+        install = BASE_DATE - timedelta(days=random.randint(0, 89))
+        user_type = "new" if (BASE_DATE - install).days <= 6 else "existing"
 
         users.append((
             f"u_{i:05d}",           # "u_00000", "u_00001", ...
@@ -263,7 +260,7 @@ def seed_content_releases(conn: duckdb.DuckDBPyConnection):
     """컨텐츠/이벤트 스케줄. 시즌 이벤트가 D-14(3/17)에 종료."""
 
     content_releases = [
-        ("c_001", "season_event", "Pizza Festival Season 3",  date(2026, 2, 10), date(2026, 3, 17)),
+        ("c_001", "season_event", "Pizza Festival Season 3",  date(2026, 2, 10), date(2026, 4, 15)),
         ("c_002", "update",       "Spring Content Update",    date(2026, 2, 20), date(2026, 4, 15)),
         ("c_003", "promotion",    "New Player Welcome Bonus", date(2026, 3, 1),  date(2026, 3, 31)),
     ]
@@ -408,11 +405,10 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
     print(f"shop_impressions: {len(impressions)}건 삽입")
 
 
-# ── 시나리오 2 트랜잭션: D7 리텐션 -12% (이벤트 종료) ──
+# ── 세션/이벤트 데이터 (이상 신호 매립 없음) ──
 
 def seed_sessions(conn: duckdb.DuckDBPyConnection):
-    """세션 로그 30일치. D-14 이후 D7 코호트(설치 7일차 유저)만 복귀 확률 감소.
-    DAU 전체에는 영향 거의 없고 D7 리텐션만 떨어지도록 설계."""
+    """세션 로그 30일치. 모든 유저 동일 복귀 확률(30%)."""
 
     users = conn.execute(
         "SELECT user_id, platform, user_type, install_date FROM users"
@@ -423,17 +419,9 @@ def seed_sessions(conn: duckdb.DuckDBPyConnection):
 
     for day_offset in range(PERIOD_DAYS):
         current_date = START_DATE + timedelta(days=day_offset)
-        is_after_event = current_date >= EVENT_END_DATE
-        # D7 코호트 판별용: 오늘이 설치 7일차인 유저의 install_date
-        d7_target_date = current_date - timedelta(days=7)
 
         for user_id, platform, user_type, install_date in users:
-            # D7 리텐션 시나리오: 이벤트 종료 후, 설치 7일차 유저만 복귀 확률 감소
-            # DAU 전체에는 영향 거의 없고 D7 리텐션만 ~5pp 하락
-            if install_date == d7_target_date and is_after_event:
-                login_rate = 0.15  # 30% → 15% (-15pp)
-            else:
-                login_rate = 0.30
+            login_rate = 0.30
 
             if random.random() > login_rate:
                 continue
@@ -462,7 +450,7 @@ def seed_sessions(conn: duckdb.DuckDBPyConnection):
 def seed_events(conn: duckdb.DuckDBPyConnection):
     """인게임 이벤트 로그. 세션 기반으로 생성.
     - stage_clear: 세션당 50% 확률로 1회
-    - event_participate: 이벤트 기간(~D-14) 중에만 발생, 이후 0건으로 급감"""
+    - event_participate: 이벤트 진행 중, 세션당 40% 확률"""
 
     sessions_data = conn.execute(
         "SELECT session_id, user_id, session_start FROM sessions"
@@ -472,8 +460,6 @@ def seed_events(conn: duckdb.DuckDBPyConnection):
     eid = 0
 
     for session_id, user_id, session_start in sessions_data:
-        session_date_str = str(session_start)[:10]
-
         # login (세션마다 1회)
         events.append((
             f"e_{eid:07d}", user_id, "login",
@@ -497,8 +483,8 @@ def seed_events(conn: duckdb.DuckDBPyConnection):
             ))
             eid += 1
 
-        # event_participate (이벤트 기간 중에만, 세션당 40% 확률)
-        if session_date_str < str(EVENT_END_DATE) and random.random() < 0.4:
+        # event_participate (이벤트 진행 중, 세션당 40% 확률)
+        if random.random() < 0.4:
             events.append((
                 f"e_{eid:07d}", user_id, "event_participate",
                 str(session_start), '{"event": "pizza_festival_s3"}',
