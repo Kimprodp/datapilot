@@ -1,0 +1,57 @@
+{
+  "_comment": "키워드 매칭 규칙. 사용자 프롬프트에 keywords 중 하나라도 포함되면 hint 를 AI 컨텍스트에 주입. 최대 3개 힌트까지.",
+  "rules": [
+    {
+      "keywords": ["디자인", "UI", "시안", "별로", "어색", "레이아웃", "스타일", "색상"],
+      "hint": "/design-review 로 AI Slop 패턴 + Design Grade 체크 가능"
+    },
+    {
+      "keywords": ["안 돼", "안됨", "안 돼요", "버그", "오류", "에러", "이상해", "재현", "예상과 달라"],
+      "hint": "/investigate 로 가설 3개 기반 체계적 조사 권장 (조사 전용, 코드 수정 X)"
+    },
+    {
+      "keywords": ["결제", "로그인", "인증", "토큰", "세션", "비밀번호", "OAuth", "권한", "admin", "관리자"],
+      "hint": "민감 영역 — 완료 후 /security-audit 권장"
+    },
+    {
+      "keywords": ["배포", "릴리스", "머지", "PR 준비", "ship"],
+      "hint": "/ship 으로 품질 게이트(테스트·리뷰·보안) 자동 통과 + 버전/CHANGELOG/PR 자동화"
+    },
+    {
+      "keywords": ["E2E", "브라우저 테스트", "Playwright", "스모크", "회귀 테스트"],
+      "hint": "/qa 로 실제 브라우저 검증 가능. 3-tier (quick/standard/exhaustive) 지원"
+    },
+    {
+      "keywords": ["리뷰", "코드 리뷰", "review"],
+      "hint": "/code-review 로 @reviewer 배치 호출 (보안 포함하려면 \"보안까지\" 인자 추가)"
+    },
+    {
+      "keywords": ["문서", "docs", "context.md", "progress.md", "갱신"],
+      "hint": "/update-docs 로 Impl Snapshot + ADR + tasks.md 일괄 갱신 제안"
+    },
+    {
+      "keywords": ["결정", "선택", "채택", "고민", "라이브러리 선택", "PG 선택", "아키텍처 결정"],
+      "hint": "/decision 으로 결정 1건을 실시간 구조화 ADR 로 기록 (8개 질문 대화형)"
+    },
+    {
+      "keywords": ["상태", "어디까지", "진행 상황", "status"],
+      "hint": "/project-status 로 현재 Phase · 활성 기능 · 블로커 · 문서 신선도 한눈에"
+    },
+    {
+      "keywords": ["새 프로젝트", "킥오프", "처음 시작"],
+      "hint": "/kickoff 로 5 Phase 인터뷰 → plan/context/tasks/CLAUDE.md 일괄 생성"
+    },
+    {
+      "keywords": ["새 기능", "기능 추가", "feature"],
+      "hint": "/feature-start → /feature-plan → /task 흐름으로 PRD → tech-spec → 구현 단계별 진행"
+    },
+    {
+      "keywords": ["정리", "청소", "cleanup", "리팩터", "기술 부채", "TODO 처리"],
+      "hint": "/cleanup 으로 오래된 TODO / 참조 없는 파일 / 큰 파일 / 빈 폴더 탐지"
+    },
+    {
+      "keywords": ["시안", "디자인 방향", "여러 안", "A안 B안", "brainstorm"],
+      "hint": "/design-shotgun 으로 3~5개 다른 스타일 시안 동시 생성 + grid 비교"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "claude-harness-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "하니스 런타임 의존성. 사용자 프로젝트 node_modules 와 격리됨.",
+  "dependencies": {
+    "playwright": "^1.45.0"
+  }
+}

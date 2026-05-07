@@ -220,3 +220,15 @@ docs/
 
 # 배포용 Mock DB는 추적 (Streamlit Cloud에서 필요)
 !data/datapilot_mock.db
+
+# Claude 하니스 런타임
+.claude/node_modules/
+.claude/state/*
+!.claude/state/.gitkeep
+.claude/scripts/*/reports/
+.claude/scripts/*/snapshots/
+.claude/scripts/*/mockups/
+.claude/settings.local.json
+
+# 하니스 설치 시 자동 생성되는 백업 (로컬 보존용)
+.claude.backup-*/
