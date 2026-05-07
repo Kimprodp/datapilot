@@ -1,8 +1,6 @@
 {
-  "$schema": "https://docs.claude.com/claude-code/schemas/settings.json",
-  "_comment": "Claude Code 프로젝트 설정. Hook 등록/권한/환경변수 관리. 상세: https://docs.claude.com/en/docs/claude-code/settings",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
-    "_comment": "Hook 활성화 위치. post-edit 은 사용자 프로젝트별 커스터마이즈 (hooks/README.md 참조).",
     "Stop": [
       {
         "hooks": [
