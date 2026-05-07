@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.claude.com/claude-code/schemas/settings.json",
+  "_comment": "Claude Code 프로젝트 설정. Hook 등록/권한/환경변수 관리. 상세: https://docs.claude.com/en/docs/claude-code/settings",
+  "hooks": {
+    "_comment": "Hook 활성화 위치. post-edit 은 사용자 프로젝트별 커스터마이즈 (hooks/README.md 참조).",
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/freshness.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/auto-skill.js"
+          }
+        ]
+      }
+    ]
+  },
+  "reminders": {
+    "_comment": "auto-skill Hook 이 참조. 프로젝트별로 조정 가능.",
+    "security_audit_interval_days": 30,
+    "cleanup_interval_days": 45,
+    "security_sensitive_keywords": [
+      "인증", "로그인", "토큰", "세션", "비밀번호", "password",
+      "결제", "카드", "환불", "PG", "payment",
+      "API 키", "시크릿", "secret", "OAuth",
+      "권한", "admin", "관리자"
+    ]
+  }
+}
