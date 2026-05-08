@@ -714,10 +714,6 @@ NUM_CUSTOMERS = 1000
 INVENTORY_OUT_DATE = ECOMMERCE_BASE_DATE - timedelta(days=7)  # 2026-03-24
 TOP_KITCHEN_PRODUCT = "p_kitchen_01"
 
-#: 시나리오 C (프로모션 종료) — D-3 부터 spring_sale 종료 → 평균 객단가 ↓
-PROMOTION_END_DATE = ECOMMERCE_BASE_DATE - timedelta(days=3)  # 2026-03-28
-SPRING_SALE_ID = "promo_spring_sale"
-
 ECOMMERCE_CATEGORIES = ["kitchen", "fashion", "electronics", "beauty"]
 PRODUCTS_PER_CATEGORY = 5
 
@@ -736,7 +732,6 @@ def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
     conn.execute("DROP TABLE IF EXISTS customers")
     conn.execute("DROP TABLE IF EXISTS orders")
     conn.execute("DROP TABLE IF EXISTS products")
-    conn.execute("DROP TABLE IF EXISTS promotions")
     conn.execute("DROP TABLE IF EXISTS category_daily_revenue")
     conn.execute("DROP TABLE IF EXISTS inventory_changes")
 
@@ -770,23 +765,12 @@ def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
     """)
 
     conn.execute("""
-        CREATE TABLE promotions (
-            promotion_id   VARCHAR PRIMARY KEY,
-            started_at     TIMESTAMP NOT NULL,
-            ended_at       TIMESTAMP NOT NULL,
-            type           VARCHAR,
-            discount_rate  DECIMAL
-        )
-    """)
-
-    conn.execute("""
         CREATE TABLE orders (
             order_id      VARCHAR PRIMARY KEY,
             customer_id   VARCHAR,
             category      VARCHAR,
             product_id    VARCHAR,
             amount        DECIMAL NOT NULL,
-            promotion_id  VARCHAR,
             paid_at       TIMESTAMP NOT NULL
         )
     """)
@@ -856,39 +840,6 @@ def seed_ecommerce_products(conn: duckdb.DuckDBPyConnection):
     print(f"products: {len(rows)}건 삽입 (p_kitchen_01 = out_of_stock)")
 
 
-def seed_ecommerce_promotions(conn: duckdb.DuckDBPyConnection):
-    """spring_sale (D-30 ~ D-3 종료) + summer_promo (소규모, 영향 X)."""
-    rows = [
-        (
-            SPRING_SALE_ID,
-            datetime.combine(ECOMMERCE_START, datetime.min.time()),
-            datetime.combine(PROMOTION_END_DATE, datetime.min.time()),
-            "seasonal",
-            0.20,  # 20% 할인
-        ),
-        (
-            "promo_summer_minor",
-            datetime.combine(
-                ECOMMERCE_BASE_DATE - timedelta(days=15),
-                datetime.min.time(),
-            ),
-            datetime.combine(
-                ECOMMERCE_BASE_DATE - timedelta(days=1),
-                datetime.min.time(),
-            ),
-            "minor",
-            0.05,
-        ),
-    ]
-    conn.executemany(
-        "INSERT INTO promotions "
-        "(promotion_id, started_at, ended_at, type, discount_rate) "
-        "VALUES (?, ?, ?, ?, ?)",
-        rows,
-    )
-    print(f"promotions: {len(rows)}건 삽입 (spring_sale 종료일={PROMOTION_END_DATE})")
-
-
 def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
     """30 일치 일별 주문. 시나리오 B/C 시점에 변동.
 
@@ -933,20 +884,8 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
                 else:
                     pid = random.choice(pids)
 
-                # 시나리오 C: spring_sale 종료 후 평균 객단가 ↓ (-20%)
-                # 종료 후 사람들이 정가에 부담 → 더 저가 상품으로 이동.
-                # 단순화: 할인 활성 (3000~5000) vs 종료 후 (2400~4000) ≈ -20%.
-                if d < PROMOTION_END_DATE:
-                    amount = random.uniform(3000, 5000)
-                    promotion_id = SPRING_SALE_ID
-                else:
-                    amount = random.uniform(2400, 4000)
-                    promotion_id = (
-                        "promo_summer_minor"
-                        if d >= ECOMMERCE_BASE_DATE - timedelta(days=15)
-                        and random.random() < 0.3
-                        else None
-                    )
+                # 일정 가격 분포 (시나리오 B 만 매립 — 카테고리별 주문수 변동만)
+                amount = random.uniform(3000, 5000)
 
                 rows.append((
                     f"o_{order_seq:06d}",
@@ -954,7 +893,6 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
                     category,
                     pid,
                     round(amount, 2),
-                    promotion_id,
                     datetime.combine(d, datetime.min.time())
                     + timedelta(seconds=random.randint(0, 86399)),
                 ))
@@ -962,8 +900,8 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
 
     conn.executemany(
         "INSERT INTO orders "
-        "(order_id, customer_id, category, product_id, amount, promotion_id, paid_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(order_id, customer_id, category, product_id, amount, paid_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         rows,
     )
     print(f"orders: {len(rows)}건 삽입")
@@ -1116,7 +1054,6 @@ def main():
         create_ecommerce_tables(conn)
         seed_ecommerce_customers(conn)
         seed_ecommerce_products(conn)
-        seed_ecommerce_promotions(conn)
         seed_ecommerce_orders(conn)
         seed_ecommerce_inventory_changes(conn)
         seed_ecommerce_category_daily_revenue(conn)

@@ -222,11 +222,11 @@ class TestEcommerceDomain:
         assert "gmv" in ECOMMERCE.supported_segment_metrics
 
     def test_allowed_tables_contains_scenario_targets(self):
-        """시나리오 B (재고) / C (프로모션) 검증 SQL 이 가리킬 테이블 포함."""
+        """시나리오 (재고 부족) 검증 SQL 이 가리킬 테이블 포함."""
         required = {
-            "category_daily_revenue",  # 시나리오 B
-            "products",                 # 시나리오 B
-            "promotions",               # 시나리오 C
+            "category_daily_revenue",  # 카테고리 매출 변동
+            "products",                 # 인기 상품 정의
+            "inventory_changes",        # 시점별 품절 검증
         }
         assert required <= ECOMMERCE.allowed_tables, (
             f"이커머스 시나리오 검증에 필수 테이블 누락: "

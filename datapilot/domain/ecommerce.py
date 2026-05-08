@@ -1,8 +1,9 @@
 """이커머스 도메인 정의 (시연용 mock).
 
-시나리오 2 개:
-- B (재고 부족): 카테고리 매출 ↓ → 인기 상품 품절. ``category_daily_revenue`` × ``products`` 1 회 GROUP BY 로 입증.
-- C (프로모션 종료): GMV ↓ → 할인 이벤트 종료. 시계열 + ``promotions`` 비교 1 회.
+시나리오 1 개:
+- 재고 부족: 인기 상품 (p_kitchen_01) D-7 품절 → kitchen 카테고리 주문수 50% 감소
+  → 전체 주문 수 / GMV 감소. ``inventory_changes`` × ``orders`` × ``category_daily_revenue``
+  로 시점별 검증.
 
 스키마 상세는 ``docs/features/domain-extension/tech-spec.md`` §4 참조.
 """
@@ -19,7 +20,6 @@ ECOMMERCE = DomainConfig(
         "customers",
         "orders",
         "products",
-        "promotions",
         "category_daily_revenue",
         "inventory_changes",
     }),
@@ -34,9 +34,8 @@ ECOMMERCE = DomainConfig(
     table_descriptions={
         "daily_kpi": "일별 KPI 집계 (gmv/orders/conversion/visitors/payment_success_rate). ① Bottleneck Detector 입력",
         "customers": "고객 마스터 (세그먼트 차원: country, customer_type[new/returning/vip], device). ② SegmentationAnalyzer 의 GROUP BY 대상",
-        "orders": "주문 이벤트 (customer_id, category, product_id, amount, promotion_id, paid_at). 시점별 매출/주문수/카테고리 분해 + 프로모션 적용 추적",
+        "orders": "주문 이벤트 (customer_id, category, product_id, amount, paid_at). 시점별 매출/주문수/카테고리 분해",
         "products": "상품 마스터 (category, inventory_status[in_stock/out_of_stock/discontinued], name). 현재 재고 상태 확인",
-        "promotions": "프로모션 이력 (started_at, ended_at, type, discount_rate). 프로모션 시작/종료 시점과 매출 변동 연관 분석에 활용",
         "category_daily_revenue": "카테고리별 일별 매출 집계 (date, category, gmv, orders). 카테고리 매출 변동 / 인기 카테고리 영향 추적",
         "inventory_changes": "재고 상태 시점별 변경 이력 (product_id, changed_at, status, note). 재고 부족 / 품절 영향 분석에 활용",
     },
@@ -54,7 +53,6 @@ ECOMMERCE = DomainConfig(
         },
         scenario_descriptions=(
             "카테고리 매출 급락 (인기 상품 재고 부족)",
-            "GMV 하락 (프로모션 종료 후 자연 감소)",
         ),
     ),
     agent_keywords=DomainKeywords(

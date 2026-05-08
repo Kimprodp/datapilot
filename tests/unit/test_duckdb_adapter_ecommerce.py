@@ -112,30 +112,6 @@ class TestScenarioSignals:
             f"시나리오 B 신호 강도 이상: D-7 전후 orders 변화율 {drop_ratio:.1%}"
         )
 
-    def test_scenario_c_gmv_drop_from_d_minus_3(self, ecommerce_adapter):
-        """시나리오 C: D-3 (2026-03-28) 부터 gmv 약 20% 감소."""
-        result = ecommerce_adapter.get_daily_kpi(
-            ECOMMERCE_ENTITY_ID, PERIOD_LAST10,
-        )
-        # D-3 직전 (3-24 ~ 3-27): 시나리오 B 가 이미 적용된 상태의 gmv
-        # D-3 이후 (3-28 ~): 시나리오 C 의 객단가 ↓ 추가 적용
-        d_minus_3_before = [
-            r["gmv"]
-            for r in result["daily"]
-            if "2026-03-24" <= r["date"] < "2026-03-28"
-        ]
-        d_minus_3_after = [
-            r["gmv"]
-            for r in result["daily"]
-            if r["date"] >= "2026-03-28"
-        ]
-        avg_before = sum(d_minus_3_before) / len(d_minus_3_before)
-        avg_after = sum(d_minus_3_after) / len(d_minus_3_after)
-        drop_ratio = (avg_before - avg_after) / avg_before
-        # 약 20% 감소
-        assert 0.10 < drop_ratio < 0.30, (
-            f"시나리오 C 신호 강도 이상: D-3 전후 gmv 변화율 {drop_ratio:.1%}"
-        )
 
 
 # ════════════════════════════════════════════════════════════════════
