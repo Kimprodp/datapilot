@@ -182,12 +182,29 @@ USER_PROMPT_TEMPLATE = """\
 
 {hypotheses_text}
 
-[가용 테이블 스키마]
-{available_schema_json}
-
 execute_sql 도구를 사용해 필요한 SQL을 실행한 뒤, \
 각 가설의 상태를 판정하고 근거를 서술하라. \
 여러 가설에 같은 데이터가 필요하면 SQL 결과를 공유하라."""
+
+
+def build_system_content(filtered_schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """SYSTEM_PROMPT + 가용 테이블 스키마를 합친 system content blocks.
+
+    Anthropic Prompt Caching 임계 1024 토큰을 채우기 위해 user 메시지의
+    정적 prefix (가용 스키마 JSON) 를 system 으로 옮긴다. ④ Validator 는
+    한 게임 분석 1회 안에서 N=2~3 anomaly × 라운드 5~16 = 10~30 회 LLM
+    호출이 발생하는데, 매 호출 system 이 동일하므로 cache_read 누적 효과
+    가 가장 크다 (라운드 곱셈 받는 핵심 위치).
+    """
+    schema_text = json.dumps(filtered_schema, ensure_ascii=False)
+    return [
+        {"type": "text", "text": SYSTEM_PROMPT},
+        {
+            "type": "text",
+            "text": f"\n\n[가용 테이블 스키마]\n{schema_text}",
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
 
 _VERDICT_SYSTEM = "가설 검증 분석 결과를 각 가설별로 구조화하라."
 _VERDICT_USER = """\
@@ -198,22 +215,9 @@ _VERDICT_USER = """\
 분석 결과:
 {analysis}"""
 
-# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
-# ④ Validator 는 라운드 곱셈으로 캐싱 효과의 90% 차지하는 핵심 위치.
-_SYSTEM_BLOCKS = [
-    {
-        "type": "text",
-        "text": SYSTEM_PROMPT,
-        "cache_control": {"type": "ephemeral"},
-    }
-]
-_VERDICT_SYSTEM_BLOCKS = [
-    {
-        "type": "text",
-        "text": _VERDICT_SYSTEM,
-        "cache_control": {"type": "ephemeral"},
-    }
-]
+# 메인 SYSTEM_PROMPT 는 invoke 시점에 가용 스키마와 합쳐 build_system_content() 가
+# 동적 빌드 (위에 정의). verdict 단계는 짧은 prompt 라 캐싱 임계 1024 미달
+# (cache 효과 0 + 페널티 0) → 정적 string 그대로 유지.
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -257,7 +261,7 @@ class DataValidator:
         self._llm_with_tools = base_llm.bind_tools([self._execute_sql_tool])
         self._verdict_chain = (
             ChatPromptTemplate.from_messages([
-                SystemMessage(content=_VERDICT_SYSTEM_BLOCKS),
+                ("system", _VERDICT_SYSTEM),
                 ("user", _VERDICT_USER),
             ])
             | base_llm.with_structured_output(_BatchVerdict)
@@ -414,12 +418,9 @@ class DataValidator:
 
         user_content = USER_PROMPT_TEMPLATE.format(
             hypotheses_text=hypotheses_text,
-            available_schema_json=json.dumps(
-                filtered_schema, ensure_ascii=False,
-            ),
         )
         messages: list[Any] = [
-            SystemMessage(content=_SYSTEM_BLOCKS),
+            SystemMessage(content=build_system_content(filtered_schema)),
             HumanMessage(content=user_content),
         ]
 

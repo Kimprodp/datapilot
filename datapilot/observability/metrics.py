@@ -144,7 +144,15 @@ class MetricsCollector(BaseCallbackHandler):
             self._warn_once(f"span record failed: {e}")
 
     def _extract_usage(self, generation: Any) -> dict[str, int] | None:
-        """LangChain Generation 에서 Anthropic usage 화이트리스트 키만 추출."""
+        """LangChain Generation 에서 Anthropic usage 화이트리스트 키만 추출.
+
+        키 이름 정규화:
+        - LangChain ``usage_metadata.input_token_details`` 는 짧은 키를 사용
+          (``cache_creation`` / ``cache_read``).
+        - Anthropic raw API 의 ``response_metadata.usage`` 는 긴 키를 사용
+          (``cache_creation_input_tokens`` / ``cache_read_input_tokens``).
+        본 메서드는 어느 경로든 후자 (Anthropic raw 키) 로 정규화한다.
+        """
         msg = getattr(generation, "message", None)
         if msg is None:
             return None
@@ -156,11 +164,28 @@ class MetricsCollector(BaseCallbackHandler):
             usage = meta.get("usage", {}) if isinstance(meta, dict) else {}
         if not isinstance(usage, dict):
             return None
-        # cache 관련 키가 nested (input_token_details) 인 경우 펼침
+
         details = usage.get("input_token_details") or {}
-        if isinstance(details, dict):
-            usage = {**usage, **details}
-        return {k: int(usage.get(k, 0) or 0) for k in _USAGE_KEYS}
+        if not isinstance(details, dict):
+            details = {}
+
+        # 캐시 키 추출: 긴 키 우선, 없으면 nested 짧은 키
+        cache_creation = (
+            usage.get("cache_creation_input_tokens")
+            or details.get("cache_creation")
+            or 0
+        )
+        cache_read = (
+            usage.get("cache_read_input_tokens")
+            or details.get("cache_read")
+            or 0
+        )
+        return {
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "cache_creation_input_tokens": int(cache_creation or 0),
+            "cache_read_input_tokens": int(cache_read or 0),
+        }
 
     def _summarize(self) -> dict[str, Any]:
         totals = {
