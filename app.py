@@ -36,7 +36,7 @@ st.set_page_config(page_title="DataPilot", page_icon="📊", layout="centered")
 # 상수
 # ------------------------------------------------------------------
 
-_APP_SUBTITLE = "운영 지표에서 병목을 찾고, 원인을 분석하고, 액션을 제안합니다."
+_APP_SUBTITLE = "운영 지표에서 병목을 찾고, 원인을 분석하고, 액션을 제안하는 데이터 코파일럿입니다."
 
 _PERIOD_OPTIONS = {
     "최근 7일": 7,
@@ -91,7 +91,17 @@ _AGENT_NAMES = {
 
 _AGENT_ORDER = ["bottleneck", "segmentation", "hypothesis", "validation", "root_cause", "action"]
 
-_SUPPORTED_DISPLAY = "매출 · DAU · 결제 성공률 · 리텐션"
+def _supported_display(domain: str) -> str:
+    """현재 도메인의 segmentable KPI 한글명 ' · ' 결합.
+
+    ``DOMAINS[domain].supported_segment_metrics`` 의 각 KPI 코드를
+    ``ui_labels.kpi_korean`` 으로 변환. 미지원 카드 안내 문구에 사용.
+    """
+    cfg = DOMAINS[domain]
+    return " · ".join(
+        cfg.ui_labels.kpi_korean.get(m, m)
+        for m in sorted(cfg.supported_segment_metrics)
+    )
 
 _VALIDATION_SORT = {"supported": 0, "rejected": 1, "unverified": 2}
 _PRIORITY_SORT = {"urgent": 0, "short_term": 1, "mid_term": 2}
@@ -130,10 +140,21 @@ def _severity_badge(severity: str) -> str:
 
 def _app_header() -> None:
     st.title("DataPilot")
+    base_style = (
+        "color:#888;font-size:16px;line-height:1.6;letter-spacing:-0.01em;"
+    )
+    note_style = (
+        "color:#aaa;font-size:14px;line-height:1.6;letter-spacing:-0.01em;"
+    )
     st.markdown(
-        f"<div style='color:#888;font-size:14px;margin-top:-10px;'>{_APP_SUBTITLE}</div>"
-        "<div style='color:#888;font-size:14px;margin-top:2px;'>"
-        "현재 데모 버전으로, 가상의 게임 데이터를 기반으로 동작합니다. 분석에 약 10분이 소요됩니다.</div>"
+        f"<div style='{base_style}margin-top:-10px;'>{_APP_SUBTITLE}</div>"
+        f"<div style='{base_style}margin-top:4px;'>"
+        f"실제 운영 환경에서는 연동된 DB의 선택 기간 데이터를 분석해 리포트를 제공합니다.</div>"
+        f"<div style='{base_style}margin-top:4px;'>"
+        f"데모 버전은 가상 데이터로 구성된 DB를 사용해 동작하며, "
+        f"현재 게임·이커머스 두 업종을 체험할 수 있습니다.</div>"
+        f"<div style='{note_style}margin-top:10px;'>"
+        f"분석에는 약 3~6분이 소요됩니다.</div>"
         "<hr style='margin:12px 0 18px 0;border:none;border-top:1px solid #eee;'>",
         unsafe_allow_html=True,
     )
@@ -207,16 +228,16 @@ def _render_anomaly_summary(anomaly_item) -> None:
 def page_start() -> None:
     _app_header()
 
-    # 산업 (도메인) 선택
+    # 업종 (도메인) 선택
     st.markdown(
-        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>산업 선택</div>",
+        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>업종 선택</div>",
         unsafe_allow_html=True,
     )
     domain_keys = list(DOMAINS.keys())  # ["game", "ecommerce"]
     if "domain" not in st.session_state:
         st.session_state.domain = "game"
     st.selectbox(
-        "산업 선택",
+        "업종 선택",
         domain_keys,
         format_func=lambda d: DOMAINS[d].ui_labels.industry_name,
         key="domain",
@@ -382,7 +403,8 @@ def page_running() -> None:
     else:
         date_range = st.session_state.period_label
     st.subheader(
-        f"{st.session_state.industry_name} ({date_range}) 분석 중..."
+        f"{st.session_state.industry_name} 업종의 ({date_range}) "
+        f"데모 데이터를 분석 중입니다..."
     )
 
     detection_ph = st.empty()
@@ -701,7 +723,7 @@ def page_report() -> None:
     else:
         date_range = st.session_state.period_label
     st.subheader(
-        f"분석 완료 — {st.session_state.industry_name} ({date_range})"
+        f"분석 완료 — {st.session_state.industry_name} 업종 ({date_range})"
     )
 
     if not report.analyzed and not report.unanalyzed:
@@ -950,7 +972,7 @@ def _render_unanalyzed(ua: UnanalyzedAnomaly) -> None:
             f"border-radius:6px;display:inline-block;'>"
             f"<div style='font-size:11px;color:#888;'>현재 세부 분석 가능 지표</div>"
             f"<div style='font-size:12px;color:#555;margin-top:2px;font-weight:500;'>"
-            f"{_SUPPORTED_DISPLAY}</div></div></div>",
+            f"{_supported_display(st.session_state.get('domain', 'game'))}</div></div></div>",
             unsafe_allow_html=True,
         )
 
