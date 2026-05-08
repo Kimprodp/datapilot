@@ -702,15 +702,34 @@ def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
 
 
 # ──────────────────────────────────────────────────────────────────
-# 이커머스 빈 스키마 (데이터 매립은 후속 task 에서)
+# 이커머스 mock — 시나리오 2 개 매립
 # ──────────────────────────────────────────────────────────────────
+
+ECOMMERCE_BASE_DATE = date(2026, 3, 31)
+ECOMMERCE_PERIOD_DAYS = 30
+ECOMMERCE_START = ECOMMERCE_BASE_DATE - timedelta(days=ECOMMERCE_PERIOD_DAYS - 1)
+NUM_CUSTOMERS = 1000
+
+#: 시나리오 B (재고 부족) — D-7 부터 kitchen 카테고리 인기 상품 품절
+INVENTORY_OUT_DATE = ECOMMERCE_BASE_DATE - timedelta(days=7)  # 2026-03-24
+TOP_KITCHEN_PRODUCT = "p_kitchen_01"
+
+#: 시나리오 C (프로모션 종료) — D-3 부터 spring_sale 종료 → 평균 객단가 ↓
+PROMOTION_END_DATE = ECOMMERCE_BASE_DATE - timedelta(days=3)  # 2026-03-28
+SPRING_SALE_ID = "promo_spring_sale"
+
+ECOMMERCE_CATEGORIES = ["kitchen", "fashion", "electronics", "beauty"]
+PRODUCTS_PER_CATEGORY = 5
+
+ECOMMERCE_COUNTRIES = ["korea", "usa", "japan", "germany"]
+ECOMMERCE_CUSTOMER_TYPES = ["new", "returning", "vip"]
+ECOMMERCE_DEVICES = ["mobile", "desktop", "tablet"]
 
 
 def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
     """이커머스 mock 의 6 테이블 빈 스키마 생성.
 
     스키마는 docs/features/domain-extension/tech-spec.md §4 정의를 따른다.
-    실제 데이터 매립은 후속 task (이커머스 mock seed) 에서 추가된다.
     """
 
     conn.execute("DROP TABLE IF EXISTS daily_kpi")
@@ -782,6 +801,219 @@ def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
     """)
 
 
+def seed_ecommerce_customers(conn: duckdb.DuckDBPyConnection):
+    """1000 명 customer. country/customer_type/device 자연 분포."""
+    rows = []
+    for i in range(NUM_CUSTOMERS):
+        country = random.choices(
+            ECOMMERCE_COUNTRIES, weights=[0.4, 0.3, 0.2, 0.1], k=1,
+        )[0]
+        customer_type = random.choices(
+            ECOMMERCE_CUSTOMER_TYPES, weights=[0.3, 0.5, 0.2], k=1,
+        )[0]
+        device = random.choices(
+            ECOMMERCE_DEVICES, weights=[0.6, 0.3, 0.1], k=1,
+        )[0]
+        rows.append((f"c_{i:04d}", country, customer_type, device))
+    conn.executemany(
+        "INSERT INTO customers (customer_id, country, customer_type, device) "
+        "VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    print(f"customers: {len(rows)}건 삽입")
+
+
+def seed_ecommerce_products(conn: duckdb.DuckDBPyConnection):
+    """20 개 상품 (4 카테고리 × 5). p_kitchen_01 만 out_of_stock."""
+    rows = []
+    for category in ECOMMERCE_CATEGORIES:
+        for i in range(1, PRODUCTS_PER_CATEGORY + 1):
+            pid = f"p_{category}_{i:02d}"
+            # 시나리오 B: kitchen 카테고리 인기 상품 (p_kitchen_01) 만 품절
+            inventory = (
+                "out_of_stock" if pid == TOP_KITCHEN_PRODUCT else "in_stock"
+            )
+            name = f"{category.capitalize()} Item {i}"
+            rows.append((pid, category, inventory, name))
+    conn.executemany(
+        "INSERT INTO products (product_id, category, inventory_status, name) "
+        "VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    print(f"products: {len(rows)}건 삽입 (p_kitchen_01 = out_of_stock)")
+
+
+def seed_ecommerce_promotions(conn: duckdb.DuckDBPyConnection):
+    """spring_sale (D-30 ~ D-3 종료) + summer_promo (소규모, 영향 X)."""
+    rows = [
+        (
+            SPRING_SALE_ID,
+            datetime.combine(ECOMMERCE_START, datetime.min.time()),
+            datetime.combine(PROMOTION_END_DATE, datetime.min.time()),
+            "seasonal",
+            0.20,  # 20% 할인
+        ),
+        (
+            "promo_summer_minor",
+            datetime.combine(
+                ECOMMERCE_BASE_DATE - timedelta(days=15),
+                datetime.min.time(),
+            ),
+            datetime.combine(
+                ECOMMERCE_BASE_DATE - timedelta(days=1),
+                datetime.min.time(),
+            ),
+            "minor",
+            0.05,
+        ),
+    ]
+    conn.executemany(
+        "INSERT INTO promotions "
+        "(promotion_id, started_at, ended_at, type, discount_rate) "
+        "VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+    print(f"promotions: {len(rows)}건 삽입 (spring_sale 종료일={PROMOTION_END_DATE})")
+
+
+def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
+    """30 일치 일별 주문. 시나리오 B/C 시점에 변동.
+
+    - 평소: 일평균 ~500 건. 카테고리 균등 분포 (각 25%, 약 125 건/일/카테고리).
+    - D-7 부터: kitchen 카테고리에서 p_kitchen_01 (해당 카테고리의 인기 1위) 50%
+      차지하던 주문이 0 건 → kitchen 일별 주문 ~50% 감소 → 전체 ~12.5% 감소
+    - D-3 부터: spring_sale 종료. 평균 객단가 약 -20% (할인 적용 종료) →
+      gmv 약 -20% (orders 수는 영향 X — 객단가만 낮아짐)
+    """
+    rows = []
+    customer_ids = [f"c_{i:04d}" for i in range(NUM_CUSTOMERS)]
+    product_pool: dict[str, list[str]] = {
+        cat: [
+            f"p_{cat}_{i:02d}"
+            for i in range(1, PRODUCTS_PER_CATEGORY + 1)
+        ]
+        for cat in ECOMMERCE_CATEGORIES
+    }
+
+    order_seq = 0
+    for day_offset in range(ECOMMERCE_PERIOD_DAYS):
+        d = ECOMMERCE_START + timedelta(days=day_offset)
+        # 평소 일별 약 500 건
+        base_count = 500
+        # 시나리오 B: D-7 부터 kitchen 주문 약 50% ↓
+        kitchen_after_outage = d >= INVENTORY_OUT_DATE
+
+        for category in ECOMMERCE_CATEGORIES:
+            cat_count = base_count // 4  # 125 건/카테고리
+            if category == "kitchen" and kitchen_after_outage:
+                cat_count = int(cat_count * 0.5)  # ~62 건
+
+            for _ in range(cat_count):
+                customer_id = random.choice(customer_ids)
+                pids = product_pool[category]
+                # kitchen 카테고리에서는 p_kitchen_01 못 사니까 (out_of_stock)
+                # 다른 4 개 상품 중 균등 선택
+                if category == "kitchen" and kitchen_after_outage:
+                    pid = random.choice(
+                        [p for p in pids if p != TOP_KITCHEN_PRODUCT]
+                    )
+                else:
+                    pid = random.choice(pids)
+
+                # 시나리오 C: spring_sale 종료 후 평균 객단가 ↓ (-20%)
+                # 종료 후 사람들이 정가에 부담 → 더 저가 상품으로 이동.
+                # 단순화: 할인 활성 (3000~5000) vs 종료 후 (2400~4000) ≈ -20%.
+                if d < PROMOTION_END_DATE:
+                    amount = random.uniform(3000, 5000)
+                    promotion_id = SPRING_SALE_ID
+                else:
+                    amount = random.uniform(2400, 4000)
+                    promotion_id = (
+                        "promo_summer_minor"
+                        if d >= ECOMMERCE_BASE_DATE - timedelta(days=15)
+                        and random.random() < 0.3
+                        else None
+                    )
+
+                rows.append((
+                    f"o_{order_seq:06d}",
+                    customer_id,
+                    category,
+                    pid,
+                    round(amount, 2),
+                    promotion_id,
+                    datetime.combine(d, datetime.min.time())
+                    + timedelta(seconds=random.randint(0, 86399)),
+                ))
+                order_seq += 1
+
+    conn.executemany(
+        "INSERT INTO orders "
+        "(order_id, customer_id, category, product_id, amount, promotion_id, paid_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    print(f"orders: {len(rows)}건 삽입")
+
+
+def seed_ecommerce_category_daily_revenue(conn: duckdb.DuckDBPyConnection):
+    """orders 집계 → category_daily_revenue."""
+    conn.execute("""
+        INSERT INTO category_daily_revenue (date, category, gmv, orders)
+        SELECT
+            CAST(paid_at AS DATE) AS date,
+            category,
+            SUM(amount) AS gmv,
+            COUNT(*) AS orders
+        FROM orders
+        GROUP BY date, category
+        ORDER BY date, category
+    """)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM category_daily_revenue"
+    ).fetchone()[0]
+    print(f"category_daily_revenue: {count}건 삽입")
+
+
+def seed_ecommerce_daily_kpi(conn: duckdb.DuckDBPyConnection):
+    """orders 집계 + 모의 visitors 로 daily_kpi 생성."""
+    # orders 집계
+    rows = conn.execute("""
+        SELECT
+            CAST(paid_at AS DATE) AS date,
+            SUM(amount) AS gmv,
+            COUNT(*) AS orders,
+            COUNT(DISTINCT customer_id) AS unique_customers
+        FROM orders
+        GROUP BY date
+        ORDER BY date
+    """).fetchall()
+
+    insert_rows = []
+    for d, gmv, orders, _unique in rows:
+        # 방문자 ~ 주문수의 ~30 배 (전환율 ~3.3%)
+        visitors = int(orders * 30 + random.randint(-200, 200))
+        conversion = orders / visitors if visitors else 0.0
+        # payment_success_rate — 양 도메인 안정 KPI (~0.97). 본 mock 에선 영향 X
+        psr = round(0.965 + random.uniform(-0.005, 0.010), 4)
+        insert_rows.append((
+            d,
+            round(float(gmv), 2),
+            int(orders),
+            round(conversion, 4),
+            visitors,
+            psr,
+        ))
+
+    conn.executemany(
+        "INSERT INTO daily_kpi "
+        "(date, gmv, orders, conversion, visitors, payment_success_rate) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        insert_rows,
+    )
+    print(f"daily_kpi (이커머스): {len(insert_rows)}건 삽입")
+
+
 def main():
     random.seed(RANDOM_SEED)  # 재현성 보장: 매번 같은 데이터 생성
 
@@ -819,8 +1051,13 @@ def main():
     conn = duckdb.connect(str(ECOMMERCE_DB_PATH))
     try:
         create_ecommerce_tables(conn)
-        print(f"이커머스 DB 빈 스키마 생성 완료: {ECOMMERCE_DB_PATH}")
-        print("(데이터 매립은 후속 task 에서)")
+        seed_ecommerce_customers(conn)
+        seed_ecommerce_products(conn)
+        seed_ecommerce_promotions(conn)
+        seed_ecommerce_orders(conn)
+        seed_ecommerce_category_daily_revenue(conn)
+        seed_ecommerce_daily_kpi(conn)
+        print(f"\n이커머스 DB 생성 완료: {ECOMMERCE_DB_PATH}")
     finally:
         conn.close()
 
