@@ -21,11 +21,14 @@ import json
 from typing import Any, Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -120,6 +123,17 @@ reasoning에 "연동 관계"를 명시한다. \
 중요: 분석 과정을 텍스트로 작성하지 말고, 즉시 도구(tool)를 호출해 결과를 반환하라. \
 모든 필드를 빠짐없이 채워야 한다."""
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+# langchain-anthropic 0.3.x 는 SystemMessage.content 가 list 형태일 때만
+# block 단위 cache_control 을 인식한다 (additional_kwargs 미지원).
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 USER_PROMPT_TEMPLATE = """\
 다음은 게임 {game_id}의 최근 {days}일 KPI 시계열이다.
 
@@ -164,24 +178,34 @@ class BottleneckDetector:
                 temperature=1.0,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(AnomalyReport)
 
-    def detect(self, kpi_series: dict[str, Any]) -> AnomalyReport:
+    def detect(
+        self,
+        kpi_series: dict[str, Any],
+        *,
+        metrics: BaseCallbackHandler | None = None,
+    ) -> AnomalyReport:
         """KPI 시계열을 분석해 이상 지표를 탐지한다.
 
         Args:
             kpi_series: ``GameDataRepository.get_daily_kpi()`` 반환값.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             AnomalyReport — anomalies(이상 목록) + normal(정상 목록).
         """
-        return self._chain.invoke({
-            "game_id": kpi_series["game_id"],
-            "days": len(kpi_series["daily"]),
-            "kpi_series_json": json.dumps(
-                kpi_series["daily"], ensure_ascii=False,
-            ),
-        })
+        metrics = metrics or NULL_METRICS
+        return self._chain.invoke(
+            {
+                "game_id": kpi_series["game_id"],
+                "days": len(kpi_series["daily"]),
+                "kpi_series_json": json.dumps(
+                    kpi_series["daily"], ensure_ascii=False,
+                ),
+            },
+            config={"callbacks": [metrics]},
+        )

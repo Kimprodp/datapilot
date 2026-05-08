@@ -22,12 +22,15 @@ import json
 from typing import Any, Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.root_cause_reasoner import RootCauseReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 
 # ------------------------------------------------------------------
 # 출력 스키마 (Pydantic)
@@ -112,6 +115,15 @@ SYSTEM_PROMPT = (
     "출력은 반드시 지정된 JSON 스키마를 따른다."
 )
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 USER_PROMPT_TEMPLATE = (
     "다음은 이상 지표의 근본 원인 분석 결과다.\n\n"
     "[이상 지표]\n"
@@ -154,7 +166,7 @@ class ActionRecommender:
                 temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(ActionPlan)
@@ -162,24 +174,31 @@ class ActionRecommender:
     def recommend(
         self,
         root_cause_report: RootCauseReport,
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> ActionPlan:
         """인과 체인을 받아 실행 가능한 액션을 제안한다.
 
         Args:
             root_cause_report: ⑤ 의 근본 원인 추론 결과.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             ActionPlan -- 단기/중기 액션 목록 + 보조 메시지.
         """
+        metrics = metrics or NULL_METRICS
         prepared = prepare_input(root_cause_report)
 
-        return self._chain.invoke({
-            "anomaly": prepared["anomaly"],
-            "root_cause_json": json.dumps(
-                prepared["root_cause"], ensure_ascii=False,
-            ),
-            "additional_investigation_json": json.dumps(
-                prepared["additional_investigation"], ensure_ascii=False,
-            ),
-            "is_unknown_cause": str(prepared["is_unknown_cause"]),
-        })
+        return self._chain.invoke(
+            {
+                "anomaly": prepared["anomaly"],
+                "root_cause_json": json.dumps(
+                    prepared["root_cause"], ensure_ascii=False,
+                ),
+                "additional_investigation_json": json.dumps(
+                    prepared["additional_investigation"], ensure_ascii=False,
+                ),
+                "is_unknown_cause": str(prepared["is_unknown_cause"]),
+            },
+            config={"callbacks": [metrics]},
+        )

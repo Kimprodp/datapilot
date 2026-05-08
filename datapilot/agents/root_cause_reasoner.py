@@ -25,14 +25,17 @@ import json
 from typing import Any
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.data_validator import ValidationResult
 from datapilot.agents.segmentation_analyzer import SegmentationReport
-from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -126,6 +129,15 @@ additional_investigation 섹션에 별도로 기재한다. \
 
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 USER_PROMPT_TEMPLATE = """\
 다음은 이상 분석 결과다.
 
@@ -169,14 +181,14 @@ class RootCauseReasoner:
     def __init__(self, *, llm: BaseChatModel | None = None) -> None:
         if llm is None:
             llm = ChatAnthropic(
-                model=OPUS_MODEL,
+                model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
                 temperature=1.0,
                 max_retries=3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(
@@ -188,6 +200,8 @@ class RootCauseReasoner:
         anomaly: AnomalyItem,
         segmentation: SegmentationReport,
         validation_results: list[ValidationResult],
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> RootCauseReport:
         """검증 결과를 종합해 근본 원인 인과 체인을 추론한다.
 
@@ -195,29 +209,34 @@ class RootCauseReasoner:
             anomaly: ① 이 탐지한 이상 지표.
             segmentation: ② 의 세그먼트 분석 결과.
             validation_results: ④ 의 검증 결과 목록.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             RootCauseReport — 인과 체인 + 추가 조사 필요 목록.
         """
+        metrics = metrics or NULL_METRICS
         prepared = prepare_input(anomaly, segmentation, validation_results)
 
-        return self._chain.invoke({
-            "anomaly_json": json.dumps(
-                prepared["anomaly"], ensure_ascii=False,
-            ),
-            "segmentation_json": json.dumps(
-                prepared["segmentation"], ensure_ascii=False,
-            ),
-            "supported_json": json.dumps(
-                [v.model_dump() for v in prepared["supported"]],
-                ensure_ascii=False,
-            ),
-            "rejected_json": json.dumps(
-                [v.model_dump() for v in prepared["rejected"]],
-                ensure_ascii=False,
-            ),
-            "unverified_json": json.dumps(
-                [v.model_dump() for v in prepared["unverified"]],
-                ensure_ascii=False,
-            ),
-        })
+        return self._chain.invoke(
+            {
+                "anomaly_json": json.dumps(
+                    prepared["anomaly"], ensure_ascii=False,
+                ),
+                "segmentation_json": json.dumps(
+                    prepared["segmentation"], ensure_ascii=False,
+                ),
+                "supported_json": json.dumps(
+                    [v.model_dump() for v in prepared["supported"]],
+                    ensure_ascii=False,
+                ),
+                "rejected_json": json.dumps(
+                    [v.model_dump() for v in prepared["rejected"]],
+                    ensure_ascii=False,
+                ),
+                "unverified_json": json.dumps(
+                    [v.model_dump() for v in prepared["unverified"]],
+                    ensure_ascii=False,
+                ),
+            },
+            config={"callbacks": [metrics]},
+        )

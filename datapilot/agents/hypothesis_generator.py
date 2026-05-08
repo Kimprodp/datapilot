@@ -18,14 +18,18 @@ from __future__ import annotations
 
 import json
 
+from typing import Any
+
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.segmentation_analyzer import SegmentationReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
+from datapilot.observability import NULL_METRICS
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -98,13 +102,29 @@ USER_PROMPT_TEMPLATE = """\
 [세그먼트 분석]
 {segmentation_json}
 
-[가용 테이블 스키마]
-{available_schema_json}
-
 이 상황에서 가장 유력한 원인 가설을 도출하라 (필요한 경우 최대 5개 까지만). \
 각 가설에 대해 "hypothesis", "reasoning", \
 "required_tables", "required_data"(가용 테이블 밖인 경우에만) \
 필드를 반드시 포함하라."""
+
+
+def build_system_content(light_schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """SYSTEM_PROMPT + 가용 스키마를 합친 system content blocks.
+
+    Anthropic Prompt Caching 임계 1024 토큰을 채우기 위해 user 메시지의
+    정적 prefix (가용 테이블 스키마) 를 system 으로 옮긴다.
+    한 게임 분석 1회 안에서 schema 가 동일하므로 N=2~3 anomaly 호출 모두
+    cache_read 효과를 받는다.
+    """
+    schema_text = json.dumps(light_schema, ensure_ascii=False)
+    return [
+        {"type": "text", "text": SYSTEM_PROMPT},
+        {
+            "type": "text",
+            "text": f"\n\n[가용 테이블 스키마]\n{schema_text}",
+            "cache_control": {"type": "ephemeral"},
+        },
+    ]
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -136,11 +156,9 @@ class HypothesisGenerator:
                 temperature=1.0,
                 max_retries=3,
             )
-        self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("user", USER_PROMPT_TEMPLATE),
-        ])
-        self._chain = self._prompt | llm.with_structured_output(HypothesisList)
+        # 가용 스키마가 system 으로 들어가면서 ChatPromptTemplate 의 정적 빌드가
+        # 부적합해짐 → invoke 시점에 messages 직접 구성.
+        self._llm = llm.with_structured_output(HypothesisList)
 
     def generate(
         self,
@@ -148,6 +166,8 @@ class HypothesisGenerator:
         anomaly: AnomalyItem,
         segmentation: SegmentationReport,
         repo: GameDataRepository,
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> HypothesisList:
         """가설을 발산한다.
 
@@ -156,10 +176,12 @@ class HypothesisGenerator:
             anomaly: ① 이 탐지한 이상 지표.
             segmentation: ② 의 세그먼트 분석 결과.
             repo: 가용 스키마 조회용 Port.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             HypothesisList — 최대 5개 가설 목록.
         """
+        metrics = metrics or NULL_METRICS
         full_schema = repo.get_available_schema(game_id)
         # 가설 생성에는 테이블명 + 설명만 전달 (토큰 절감)
         # 컬럼 상세는 ④ Data Validator가 SQL 작성 시 사용
@@ -170,11 +192,15 @@ class HypothesisGenerator:
             ]
         }
 
-        return self._chain.invoke({
-            "game_id": game_id,
-            "anomaly_json": anomaly.model_dump_json(),
-            "segmentation_json": segmentation.model_dump_json(),
-            "available_schema_json": json.dumps(
-                light_schema, ensure_ascii=False,
-            ),
-        })
+        messages = [
+            SystemMessage(content=build_system_content(light_schema)),
+            HumanMessage(content=USER_PROMPT_TEMPLATE.format(
+                game_id=game_id,
+                anomaly_json=anomaly.model_dump_json(),
+                segmentation_json=segmentation.model_dump_json(),
+            )),
+        ]
+        return self._llm.invoke(
+            messages,
+            config={"callbacks": [metrics]},
+        )

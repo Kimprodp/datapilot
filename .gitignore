@@ -218,6 +218,12 @@ data/*.db
 # 내부 문서(별도 관리용)
 docs/
 
+# Harness 작업 산출물 (idea/spec/progress 메모)
+.draft/
+
+# 분석 메트릭 로그 (.jsonl, 로컬 측정용)
+.logs/
+
 # 배포용 Mock DB는 추적 (Streamlit Cloud에서 필요)
 !data/datapilot_mock.db
 

@@ -137,15 +137,17 @@ class TestClassify:
         result = classify(h, _AVAILABLE_TABLES)
         assert result == "unverifiable"
 
-    def test_returns_unverifiable_when_partial_tables_not_in_whitelist(self):
-        """일부 테이블만 화이트리스트 내 → 전체 unverifiable.
+    def test_returns_verifiable_when_partial_tables_in_whitelist(self):
+        """일부 테이블이 화이트리스트 내 → verifiable (ANY-match 정책).
 
-        payments는 허용이지만 ad_platform은 미허용 → unverifiable.
-        Java 비유: Set.containsAll() 이 false이면 통째로 거부.
+        payments는 허용이지만 ad_platform은 미허용. classify() 는 ANY-match
+        이므로 가용 테이블만으로 부분 검증을 시도한다 (LLM 이 외부 테이블을
+        섞어 넣어도 검증 기회를 잃지 않게).
+        Java 비유: Collection.disjoint() 가 false 면 (교집합이 비어있지 않으면) verifiable.
         """
         h = _make_hypothesis(required_tables=["payments", "ad_platform"])
         result = classify(h, _AVAILABLE_TABLES)
-        assert result == "unverifiable"
+        assert result == "verifiable"
 
     def test_returns_verifiable_when_single_valid_table(self):
         """required_tables에 유효한 테이블 1개 → verifiable."""
