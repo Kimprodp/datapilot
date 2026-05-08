@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.data_validator import ValidationResult
 from datapilot.agents.segmentation_analyzer import SegmentationReport
-from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
+from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ class RootCauseReasoner:
     def __init__(self, *, llm: BaseChatModel | None = None) -> None:
         if llm is None:
             llm = ChatAnthropic(
-                model=OPUS_MODEL,
+                model=SONNET_MODEL,
                 api_key=ANTHROPIC_API_KEY,
                 max_tokens=MAX_TOKENS,
                 temperature=1.0,
