@@ -17,7 +17,7 @@ Java 비유:
     @Service
     public class DataValidatorService {
         private final ChatModel llm;
-        private final GameDataRepository repo;
+        private final DataRepository repo;
         // LLM이 Tool Use로 repo.executeReadonlySql()를 호출
     }
 """
@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field
 from datapilot.agents.hypothesis_generator import Hypothesis, HypothesisList
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.observability import NULL_METRICS
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ──────────────────────────────────────────────────────────────────
 # 상수
@@ -236,7 +236,7 @@ class DataValidator:
 
         public DataValidatorService(
             @Autowired ChatModel llm,
-            @Autowired GameDataRepository repo
+            @Autowired DataRepository repo
         ) { ... }
     """
 
@@ -244,7 +244,7 @@ class DataValidator:
         self,
         *,
         llm: BaseChatModel | None = None,
-        repo: GameDataRepository,
+        repo: DataRepository,
     ) -> None:
         self._repo = repo
         base_llm = llm or ChatAnthropic(

@@ -30,7 +30,7 @@ from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.segmentation_analyzer import SegmentationReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
 from datapilot.observability import NULL_METRICS
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -165,7 +165,7 @@ class HypothesisGenerator:
         game_id: str,
         anomaly: AnomalyItem,
         segmentation: SegmentationReport,
-        repo: GameDataRepository,
+        repo: DataRepository,
         *,
         metrics: BaseCallbackHandler | None = None,
     ) -> HypothesisList:

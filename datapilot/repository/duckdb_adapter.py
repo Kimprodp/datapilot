@@ -1,11 +1,11 @@
-"""DuckDB 기반 GameDataRepository 구현.
+"""DuckDB 기반 DataRepository 구현.
 
 데모/개발 환경에서 사용되는 Adapter. `data/datapilot_mock.db` 파일을
 read-only 모드로 열어 에이전트의 조회 요청을 처리한다.
 
 Java 비유:
     @Repository
-    public class DuckDBGameDataRepository implements GameDataRepository { ... }
+    public class DuckDBDataRepository implements DataRepository { ... }
 
 생성자에 `connection`을 주입할 수 있어 테스트에서는 in-memory DuckDB를
 그대로 넘길 수 있다 (생성자 주입 = Constructor Injection).
@@ -19,13 +19,15 @@ from typing import Any
 
 import duckdb
 
-from datapilot.repository.port import GameDataRepository
+from datapilot.domain import DOMAINS
+from datapilot.repository.port import DataRepository
 
 # ──────────────────────────────────────────────────────────────────
 # 상수
 # ──────────────────────────────────────────────────────────────────
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "datapilot_mock.db"
+#: 프로젝트 루트 (`data/mock/<domain>.db` 경로 해석에 사용)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 #: users 테이블에서 세그먼트 차원으로 노출하지 않을 컬럼
 _USER_META_COLUMNS = frozenset({"user_id", "install_date"})
@@ -56,39 +58,61 @@ _TABLE_DESCRIPTIONS: dict[str, str] = {
 # ──────────────────────────────────────────────────────────────────
 
 
-class DuckDBAdapter(GameDataRepository):
-    """DuckDB 파일을 read-only로 연 GameDataRepository 구현.
+class DuckDBAdapter(DataRepository):
+    """DuckDB 파일을 read-only로 연 DataRepository 구현.
 
-    현재 Mock DB는 단일 게임(pizza_ready) 전용이므로 `game_id` 파라미터는
+    도메인별 mock DB 파일을 ``domain`` 인자로 분기한다 (게임 = ``data/mock/game.db`` /
+    이커머스 = ``data/mock/ecommerce.db``). 단일 mock 단위라 ``entity_id`` 파라미터는
     인터페이스 호환성을 위해 받기만 하고 필터링에는 사용하지 않는다.
-    BigQueryAdapter에서는 `WHERE game_id = @game_id`로 사용될 예정.
+    BigQueryAdapter 에서는 ``WHERE entity_id = @entity_id`` 로 사용될 예정.
     """
 
     def __init__(
         self,
         db_path: Path | str | None = None,
         *,
+        domain: str = "game",
         connection: duckdb.DuckDBPyConnection | None = None,
     ) -> None:
         """Adapter 초기화.
 
         Args:
-            db_path: DuckDB 파일 경로. None이면 `data/datapilot_mock.db` 사용.
+            db_path: DuckDB 파일 경로 (호환용 — 명시 시 ``domain`` 디폴트 경로 무시).
+                None 이면 ``DOMAINS[domain].db_path`` 사용.
+            domain: 도메인 식별자 (``"game"`` / ``"ecommerce"``). 기본 ``"game"``
+                (백워드 호환). ``DOMAINS`` 에 등록된 값만 허용.
             connection: 이미 연 연결을 주입할 때 사용 (테스트용).
-                주입 시 `db_path`는 무시되고, `close()`도 소유하지 않는다.
+                주입 시 ``db_path`` 와 ``domain`` 디폴트 경로는 무시되고,
+                ``close()`` 도 소유하지 않는다.
+
+        Raises:
+            ValueError: ``db_path`` 와 ``connection`` 모두 없는데 ``domain`` 이
+                ``DOMAINS`` 에 없을 때.
+            FileNotFoundError: 해석된 DB 파일이 존재하지 않을 때.
         """
+        self._domain = domain
         if connection is not None:
             self._conn = connection
             self._owns_connection = False
+            return
+
+        if db_path is not None:
+            path = Path(db_path)
         else:
-            path = Path(db_path) if db_path else DEFAULT_DB_PATH
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"DuckDB 파일을 찾을 수 없습니다: {path}. "
-                    "`uv run python scripts/seed_mock_data.py` 로 먼저 생성하세요."
+            if domain not in DOMAINS:
+                raise ValueError(
+                    f"unsupported domain: {domain!r}. "
+                    f"supported: {sorted(DOMAINS.keys())}"
                 )
-            self._conn = duckdb.connect(str(path), read_only=True)
-            self._owns_connection = True
+            path = _PROJECT_ROOT / DOMAINS[domain].db_path
+
+        if not path.exists():
+            raise FileNotFoundError(
+                f"DuckDB 파일을 찾을 수 없습니다: {path}. "
+                "`uv run python scripts/seed_mock_data.py` 로 먼저 생성하세요."
+            )
+        self._conn = duckdb.connect(str(path), read_only=True)
+        self._owns_connection = True
 
     def close(self) -> None:
         """연결을 닫는다 (직접 생성한 경우에만)."""
@@ -107,12 +131,12 @@ class DuckDBAdapter(GameDataRepository):
 
     def get_daily_kpi(
         self,
-        game_id: str,
+        entity_id: str,
         period: tuple[date, date],
     ) -> dict[str, Any]:
         start, end = period
         _validate_period(start, end)
-        # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 WHERE game_id = ? 추가.
+        # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 WHERE entity_id = ? 추가.
         rows = self._conn.execute(
             """
             SELECT
@@ -145,7 +169,7 @@ class DuckDBAdapter(GameDataRepository):
         ]
 
         return {
-            "game_id": game_id,
+            "entity_id": entity_id,
             "period": {"from": start.isoformat(), "to": end.isoformat()},
             "daily": daily,
         }
@@ -154,7 +178,7 @@ class DuckDBAdapter(GameDataRepository):
     # ② 세그먼트 분해
     # ──────────────────────────────────────────────────────────
 
-    def get_available_dimensions(self, game_id: str) -> list[str]:
+    def get_available_dimensions(self, entity_id: str) -> list[str]:
         # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 dataset 기준 필터 추가.
         rows = self._conn.execute(
             """
@@ -168,7 +192,7 @@ class DuckDBAdapter(GameDataRepository):
 
     def get_metric_by_segments(
         self,
-        game_id: str,
+        entity_id: str,
         metric: str,
         period: tuple[date, date],
         dimensions: list[str],
@@ -177,7 +201,7 @@ class DuckDBAdapter(GameDataRepository):
         all_dates = _date_range_inclusive(start, end)
 
         # 차원 이름 화이트리스트 검증 (SQL identifier 인젝션 방지)
-        allowed_dims = set(self.get_available_dimensions(game_id))
+        allowed_dims = set(self.get_available_dimensions(entity_id))
         unknown = [d for d in dimensions if d not in allowed_dims]
         if unknown:
             raise ValueError(
@@ -192,7 +216,7 @@ class DuckDBAdapter(GameDataRepository):
             segments[dim] = _pivot_to_timeseries(rows, all_dates, fill_value=fill)
 
         return {
-            "game_id": game_id,
+            "entity_id": entity_id,
             "metric": metric,
             "period": {"from": start.isoformat(), "to": end.isoformat()},
             "segments": segments,
@@ -292,7 +316,7 @@ class DuckDBAdapter(GameDataRepository):
     # ③ 가용 스키마
     # ──────────────────────────────────────────────────────────
 
-    def get_available_schema(self, game_id: str) -> dict[str, Any]:
+    def get_available_schema(self, entity_id: str) -> dict[str, Any]:
         # Mock DB는 단일 게임 전용. BigQueryAdapter에서는 dataset 기준 필터 추가.
         rows = self._conn.execute(
             """

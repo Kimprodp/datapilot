@@ -225,7 +225,8 @@ docs/
 .logs/
 
 # 배포용 Mock DB는 추적 (Streamlit Cloud에서 필요)
-!data/datapilot_mock.db
+!data/mock/
+!data/mock/*.db
 
 # Claude 하니스 런타임
 .claude/node_modules/

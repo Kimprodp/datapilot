@@ -29,7 +29,7 @@ LLM API 실제 호출 없음. 모든 LLM 의존 코드는 unittest.mock으로 �
 Java 비유:
     @ExtendWith(MockitoExtension.class)
     class DataValidatorTest {
-        @Mock GameDataRepository mockRepo;
+        @Mock DataRepository mockRepo;
         @InjectMocks DataValidator validator;
     }
 """
@@ -47,7 +47,7 @@ from datapilot.agents.data_validator import (
     classify,
 )
 from datapilot.agents.hypothesis_generator import Hypothesis, HypothesisList
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -87,11 +87,11 @@ def _make_hypothesis(
 
 
 def _make_mock_repo() -> MagicMock:
-    """GameDataRepository 인터페이스를 구현한 Mock 객체.
+    """DataRepository 인터페이스를 구현한 Mock 객체.
 
-    Java 비유: Mockito.mock(GameDataRepository.class)
+    Java 비유: Mockito.mock(DataRepository.class)
     """
-    mock_repo = MagicMock(spec=GameDataRepository)
+    mock_repo = MagicMock(spec=DataRepository)
     mock_repo.execute_readonly_sql.return_value = [{"revenue": 100}]
     return mock_repo
 

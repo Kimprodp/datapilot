@@ -49,7 +49,7 @@ from datapilot.pipeline import (
     PipelineStep,
     UnanalyzedAnomaly,
 )
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -155,11 +155,11 @@ def _make_action_plan(anomaly: str = "revenue") -> ActionPlan:
 
 
 def _make_mock_repo(anomaly_report: AnomalyReport | None = None) -> MagicMock:
-    """GameDataRepository 인터페이스 Mock 생성.
+    """DataRepository 인터페이스 Mock 생성.
 
-    Java 비유: Mockito.mock(GameDataRepository.class)
+    Java 비유: Mockito.mock(DataRepository.class)
     """
-    mock_repo = MagicMock(spec=GameDataRepository)
+    mock_repo = MagicMock(spec=DataRepository)
     mock_repo.get_daily_kpi.return_value = {
         "game_id": "pizza_ready",
         "period": {"from": "2025-03-25", "to": "2025-04-01"},

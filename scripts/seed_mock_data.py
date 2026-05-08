@@ -1,11 +1,11 @@
 """
 Mock 데이터 생성 스크립트
 
-DuckDB 파일(data/datapilot_mock.db)에 12개 테이블을 생성하고
-Pizza Ready 30일치 Mock 데이터를 삽입한다.
-2개 시나리오가 매립되어 있다:
-- Android UI 변경 (3/28) → 인앱결제 매출 ↓
-- PG 장애 PagSeguro (3/31) → 결제 성공률 ↓
+DuckDB 파일에 도메인별 mock 을 생성한다.
+- 게임 (data/mock/game.db): 12 테이블 + Pizza Ready 30일치 데이터.
+  2개 시나리오: Android UI 변경 (3/28) / PG 장애 PagSeguro (3/31).
+- 이커머스 (data/mock/ecommerce.db): 6 테이블 빈 스키마.
+  데이터 매립은 후속 task (이커머스 mock seed) 에서.
 
 실행: uv run python scripts/seed_mock_data.py
 """
@@ -16,7 +16,9 @@ from datetime import date, datetime, timedelta
 import duckdb
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "data" / "datapilot_mock.db"
+DATA_DIR = Path(__file__).parent.parent / "data" / "mock"
+DB_PATH = DATA_DIR / "game.db"
+ECOMMERCE_DB_PATH = DATA_DIR / "ecommerce.db"
 BASE_DATE = date(2026, 3, 31)   # 데이터 기간 마지막 날
 PERIOD_DAYS = 30                # 30일치
 NUM_USERS = 3000                # Mock 유저 수 (D7 코호트 일 ~25명, 실행 시간 절충)
@@ -699,16 +701,98 @@ def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
     print(f"daily_kpi: {count}건 삽입")
 
 
+# ──────────────────────────────────────────────────────────────────
+# 이커머스 빈 스키마 (데이터 매립은 후속 task 에서)
+# ──────────────────────────────────────────────────────────────────
+
+
+def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
+    """이커머스 mock 의 6 테이블 빈 스키마 생성.
+
+    스키마는 docs/features/domain-extension/tech-spec.md §4 정의를 따른다.
+    실제 데이터 매립은 후속 task (이커머스 mock seed) 에서 추가된다.
+    """
+
+    conn.execute("DROP TABLE IF EXISTS daily_kpi")
+    conn.execute("DROP TABLE IF EXISTS customers")
+    conn.execute("DROP TABLE IF EXISTS orders")
+    conn.execute("DROP TABLE IF EXISTS products")
+    conn.execute("DROP TABLE IF EXISTS promotions")
+    conn.execute("DROP TABLE IF EXISTS category_daily_revenue")
+
+    conn.execute("""
+        CREATE TABLE daily_kpi (
+            date                 DATE    PRIMARY KEY,
+            gmv                  DECIMAL NOT NULL,
+            orders               INTEGER NOT NULL,
+            conversion           DECIMAL NOT NULL,  -- 0~1
+            visitors             INTEGER NOT NULL,
+            payment_success_rate DECIMAL NOT NULL   -- 0~1
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE customers (
+            customer_id   VARCHAR PRIMARY KEY,
+            country       VARCHAR,
+            customer_type VARCHAR,  -- new / returning / vip
+            device        VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE products (
+            product_id        VARCHAR PRIMARY KEY,
+            category          VARCHAR NOT NULL,
+            inventory_status  VARCHAR NOT NULL,  -- in_stock / out_of_stock / discontinued
+            name              VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE promotions (
+            promotion_id   VARCHAR PRIMARY KEY,
+            started_at     TIMESTAMP NOT NULL,
+            ended_at       TIMESTAMP NOT NULL,
+            type           VARCHAR,
+            discount_rate  DECIMAL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE orders (
+            order_id      VARCHAR PRIMARY KEY,
+            customer_id   VARCHAR,
+            category      VARCHAR,
+            product_id    VARCHAR,
+            amount        DECIMAL NOT NULL,
+            promotion_id  VARCHAR,
+            paid_at       TIMESTAMP NOT NULL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE category_daily_revenue (
+            date     DATE NOT NULL,
+            category VARCHAR NOT NULL,
+            gmv      DECIMAL NOT NULL,
+            orders   INTEGER NOT NULL,
+            PRIMARY KEY (date, category)
+        )
+    """)
+
+
 def main():
     random.seed(RANDOM_SEED)  # 재현성 보장: 매번 같은 데이터 생성
 
-    # 기존 DB 파일 있으면 삭제 후 재생성
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ── 게임 DB ─────────────────────────────────────────────────
     if DB_PATH.exists():
         DB_PATH.unlink()
-        print(f"기존 DB 삭제: {DB_PATH}")
+        print(f"기존 게임 DB 삭제: {DB_PATH}")
 
     conn = duckdb.connect(str(DB_PATH))
-
     try:
         create_tables(conn)
         seed_users(conn)
@@ -723,7 +807,20 @@ def main():
         seed_payment_errors(conn)
         seed_payment_attempts(conn)
         seed_daily_kpi(conn)
-        print(f"\nDB 생성 완료: {DB_PATH}")
+        print(f"\n게임 DB 생성 완료: {DB_PATH}")
+    finally:
+        conn.close()
+
+    # ── 이커머스 DB (빈 스키마) ──────────────────────────────────
+    if ECOMMERCE_DB_PATH.exists():
+        ECOMMERCE_DB_PATH.unlink()
+        print(f"기존 이커머스 DB 삭제: {ECOMMERCE_DB_PATH}")
+
+    conn = duckdb.connect(str(ECOMMERCE_DB_PATH))
+    try:
+        create_ecommerce_tables(conn)
+        print(f"이커머스 DB 빈 스키마 생성 완료: {ECOMMERCE_DB_PATH}")
+        print("(데이터 매립은 후속 task 에서)")
     finally:
         conn.close()
 

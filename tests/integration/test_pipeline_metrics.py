@@ -40,7 +40,7 @@ from datapilot.agents.segmentation_analyzer import (
 )
 from datapilot.observability import MetricsCollector
 from datapilot.pipeline import PipelineOrchestrator
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ─── 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ def _action_plan() -> ActionPlan:
 
 
 def _make_mock_repo() -> MagicMock:
-    repo = MagicMock(spec=GameDataRepository)
+    repo = MagicMock(spec=DataRepository)
     repo.get_daily_kpi.return_value = {"game_id": _GAME_ID, "daily": []}
     repo.get_available_schema.return_value = {
         "tables": [{"name": "payments", "columns": [], "description": ""}]

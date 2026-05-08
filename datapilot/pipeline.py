@@ -40,7 +40,10 @@ from datapilot.agents.segmentation_analyzer import (
     SegmentationReport,
 )
 from datapilot.observability import NULL_METRICS, MetricsCollector
-from datapilot.repository.port import SUPPORTED_SEGMENT_METRICS, GameDataRepository
+from datapilot.repository.port import DataRepository, get_supported_segment_metrics
+
+# 게임 디폴트 — 도메인별 인자 처리는 후속 task (`AgentBundle.create + Pipeline agents`) 에서.
+_SEGMENT_METRICS = get_supported_segment_metrics("game")
 
 # ------------------------------------------------------------------
 # 파이프라인 State 모델
@@ -125,7 +128,7 @@ class PipelineOrchestrator:
         ) { ... }
     """
 
-    def __init__(self, repo: GameDataRepository) -> None:
+    def __init__(self, repo: DataRepository) -> None:
         self._repo = repo
         self._detector = BottleneckDetector()
         self._segmenter = SegmentationAnalyzer()
@@ -187,7 +190,7 @@ class PipelineOrchestrator:
             segmentable: list[AnomalyItem] = []
             non_segmentable: list[AnomalyItem] = []
             for a in anomaly_report.anomalies:
-                if a.metric in SUPPORTED_SEGMENT_METRICS:
+                if a.metric in _SEGMENT_METRICS:
                     segmentable.append(a)
                 else:
                     non_segmentable.append(a)

@@ -66,8 +66,8 @@ class TestGetDailyKpi:
     def test_returns_expected_top_level_keys(self, adapter):
         result = adapter.get_daily_kpi(GAME_ID, (FULL_START, FULL_END))
 
-        assert set(result.keys()) == {"game_id", "period", "daily"}
-        assert result["game_id"] == GAME_ID
+        assert set(result.keys()) == {"entity_id", "period", "daily"}
+        assert result["entity_id"] == GAME_ID
         assert result["period"]["from"] == "2026-03-02"
         assert result["period"]["to"] == "2026-03-31"
 
@@ -126,7 +126,7 @@ class TestGetMetricBySegments:
             GAME_ID, "revenue", (FULL_START, FULL_END), ["platform"]
         )
 
-        assert set(result.keys()) == {"game_id", "metric", "period", "segments"}
+        assert set(result.keys()) == {"entity_id", "metric", "period", "segments"}
         assert result["metric"] == "revenue"
 
     def test_returns_segment_values_with_correct_length(self, adapter):

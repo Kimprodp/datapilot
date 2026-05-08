@@ -12,7 +12,7 @@ Java 비유:
     @Service
     public class SegmentationAnalyzerService {
         private final ChatModel llm;
-        private final GameDataRepository repo;  // analyze 호출 시 주입
+        private final DataRepository repo;  // analyze 호출 시 주입
         public SegmentationReport analyze(...) { ... }
     }
 """
@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
 from datapilot.observability import NULL_METRICS
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -155,7 +155,7 @@ class SegmentationAnalyzer:
         game_id: str,
         anomaly: AnomalyItem,
         period: tuple[date, date],
-        repo: GameDataRepository,
+        repo: DataRepository,
         *,
         metrics: BaseCallbackHandler | None = None,
     ) -> SegmentationReport:
@@ -178,7 +178,7 @@ class SegmentationAnalyzer:
 
         # 2. 모든 차원에 대해 세그먼트별 시계열 조회
         segmented = repo.get_metric_by_segments(
-            game_id=game_id,
+            entity_id=game_id,
             metric=anomaly.metric,
             period=period,
             dimensions=dimensions,

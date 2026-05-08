@@ -192,7 +192,7 @@ class BottleneckDetector:
         """KPI 시계열을 분석해 이상 지표를 탐지한다.
 
         Args:
-            kpi_series: ``GameDataRepository.get_daily_kpi()`` 반환값.
+            kpi_series: ``DataRepository.get_daily_kpi()`` 반환값.
             metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
