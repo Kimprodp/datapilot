@@ -21,11 +21,13 @@ import json
 from typing import Any, Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
 # 출력 스키마 (Pydantic)
@@ -169,19 +171,29 @@ class BottleneckDetector:
         ])
         self._chain = self._prompt | llm.with_structured_output(AnomalyReport)
 
-    def detect(self, kpi_series: dict[str, Any]) -> AnomalyReport:
+    def detect(
+        self,
+        kpi_series: dict[str, Any],
+        *,
+        metrics: BaseCallbackHandler | None = None,
+    ) -> AnomalyReport:
         """KPI 시계열을 분석해 이상 지표를 탐지한다.
 
         Args:
             kpi_series: ``GameDataRepository.get_daily_kpi()`` 반환값.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             AnomalyReport — anomalies(이상 목록) + normal(정상 목록).
         """
-        return self._chain.invoke({
-            "game_id": kpi_series["game_id"],
-            "days": len(kpi_series["daily"]),
-            "kpi_series_json": json.dumps(
-                kpi_series["daily"], ensure_ascii=False,
-            ),
-        })
+        metrics = metrics or NULL_METRICS
+        return self._chain.invoke(
+            {
+                "game_id": kpi_series["game_id"],
+                "days": len(kpi_series["daily"]),
+                "kpi_series_json": json.dumps(
+                    kpi_series["daily"], ensure_ascii=False,
+                ),
+            },
+            config={"callbacks": [metrics]},
+        )

@@ -29,6 +29,7 @@ import re
 from typing import Any, Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -37,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from datapilot.agents.hypothesis_generator import Hypothesis, HypothesisList
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -314,6 +316,8 @@ class DataValidator:
         self,
         hypothesis_list: HypothesisList,
         available_schema: dict[str, Any],
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> list[ValidationResult]:
         """가설 목록을 배치로 검증한다.
 
@@ -323,10 +327,14 @@ class DataValidator:
         Args:
             hypothesis_list: ③ 의 출력.
             available_schema: ``repo.get_available_schema()`` 반환값.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
+                    NullMetricsCollector 도 ``span("validator_round")`` 가
+                    no-op 으로 동작하므로 라운드 측정 분기 없이 사용한다.
 
         Returns:
             각 가설에 대한 ValidationResult 리스트 (입력 순서 유지).
         """
+        metrics = metrics or NULL_METRICS
         self._allowed_tables = frozenset(
             t["name"] for t in available_schema["tables"]
         )
@@ -348,7 +356,7 @@ class DataValidator:
         # 2. 배치 검증: verifiable 가설을 하나의 대화에서 처리
         if verifiable:
             batch_results = self._llm_validate_batch(
-                [h for _, h in verifiable], available_schema,
+                [h for _, h in verifiable], available_schema, metrics,
             )
             for (i, _), result in zip(verifiable, batch_results):
                 results_map[i] = result
@@ -365,6 +373,7 @@ class DataValidator:
         self,
         hypotheses: list[Hypothesis],
         available_schema: dict[str, Any],
+        metrics: BaseCallbackHandler,
     ) -> list[ValidationResult]:
         """verifiable 가설 N개를 하나의 LLM 대화에서 검증한다."""
         # 가설 목록 텍스트 구성
@@ -404,9 +413,16 @@ class DataValidator:
         # 배치용 라운드 상한: 가설 수에 비례
         max_rounds = MAX_TOOL_ROUNDS * len(hypotheses)
 
+        # span() 은 NULL_METRICS 에서도 no-op 컨텍스트 매니저이므로
+        # 분기 없이 항상 with 블록으로 감싼다 (라운드 곱셈 측정의 핵심 위치).
+        callback_config: dict[str, Any] = {"callbacks": [metrics]}
+
         # 에이전트 루프
         for _ in range(max_rounds):
-            response = self._llm_with_tools.invoke(messages)
+            with metrics.span("validator_round"):
+                response = self._llm_with_tools.invoke(
+                    messages, config=callback_config,
+                )
             messages.append(response)
 
             if not response.tool_calls:
@@ -439,10 +455,13 @@ class DataValidator:
 
         # 배치 판정 추출: 1회 structured output 호출
         analysis_text = response.content if response else ""
-        batch_verdict = self._verdict_chain.invoke({
-            "hypotheses_text": hypotheses_text,
-            "analysis": analysis_text,
-        })
+        batch_verdict = self._verdict_chain.invoke(
+            {
+                "hypotheses_text": hypotheses_text,
+                "analysis": analysis_text,
+            },
+            config=callback_config,
+        )
 
         # 판정 매핑
         results: list[ValidationResult] = []

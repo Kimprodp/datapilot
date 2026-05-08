@@ -193,23 +193,25 @@ def _make_orchestrator_with_mocks(
     orchestrator._detector.detect = Mock(return_value=anomaly_report)
 
     # ② Segmentation Analyzer — metric별 반환값 지원
+    # 키워드 인자 (metrics=...) 도 받도록 **kwargs 처리: pipeline 이 metrics 를
+    # 모든 에이전트에 전달하기 시작했지만 mock 자체는 metrics 를 사용하지 않는다.
     if segmentation_results is not None:
-        def _seg_side_effect(game_id, anomaly, period, repo):
+        def _seg_side_effect(game_id, anomaly, period, repo, **_):
             return segmentation_results[anomaly.metric]
         orchestrator._segmenter.analyze = Mock(side_effect=_seg_side_effect)
     else:
         orchestrator._segmenter.analyze = Mock(
-            side_effect=lambda game_id, anomaly, period, repo: _make_segmentation_report(anomaly.metric)
+            side_effect=lambda game_id, anomaly, period, repo, **_: _make_segmentation_report(anomaly.metric)
         )
 
     # ③ Hypothesis Generator — metric별 반환값 지원
     if hypothesis_results is not None:
-        def _hyp_side_effect(game_id, anomaly, segmentation, repo):
+        def _hyp_side_effect(game_id, anomaly, segmentation, repo, **_):
             return hypothesis_results[anomaly.metric]
         orchestrator._hypothesis_gen.generate = Mock(side_effect=_hyp_side_effect)
     else:
         orchestrator._hypothesis_gen.generate = Mock(
-            side_effect=lambda game_id, anomaly, segmentation, repo: _make_hypothesis_list(anomaly.metric)
+            side_effect=lambda game_id, anomaly, segmentation, repo, **_: _make_hypothesis_list(anomaly.metric)
         )
 
     # ④ Data Validator
@@ -218,22 +220,22 @@ def _make_orchestrator_with_mocks(
 
     # ⑤ Root Cause Reasoner — metric별 반환값 지원
     if root_cause_results is not None:
-        def _rc_side_effect(anomaly, segmentation, validation_results):
+        def _rc_side_effect(anomaly, segmentation, validation_results, **_):
             return root_cause_results[anomaly.metric]
         orchestrator._reasoner.reason = Mock(side_effect=_rc_side_effect)
     else:
         orchestrator._reasoner.reason = Mock(
-            side_effect=lambda anomaly, segmentation, validation_results: _make_root_cause_report(anomaly.metric)
+            side_effect=lambda anomaly, segmentation, validation_results, **_: _make_root_cause_report(anomaly.metric)
         )
 
     # ⑥ Action Recommender — metric별 반환값 지원
     if action_plan_results is not None:
-        def _ap_side_effect(root_cause_report):
+        def _ap_side_effect(root_cause_report, **_):
             return action_plan_results[root_cause_report.anomaly]
         orchestrator._recommender.recommend = Mock(side_effect=_ap_side_effect)
     else:
         orchestrator._recommender.recommend = Mock(
-            side_effect=lambda root_cause_report: _make_action_plan(root_cause_report.anomaly)
+            side_effect=lambda root_cause_report, **_: _make_action_plan(root_cause_report.anomaly)
         )
 
     return orchestrator, mock_repo

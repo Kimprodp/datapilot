@@ -24,12 +24,14 @@ from datetime import date
 from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -144,6 +146,8 @@ class SegmentationAnalyzer:
         anomaly: AnomalyItem,
         period: tuple[date, date],
         repo: GameDataRepository,
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> SegmentationReport:
         """이상 지표를 세그먼트 차원으로 분해 분석한다.
 
@@ -152,10 +156,13 @@ class SegmentationAnalyzer:
             anomaly: ① Bottleneck Detector가 탐지한 이상 지표.
             period: (시작일, 종료일) inclusive.
             repo: 데이터 조회용 Port.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             SegmentationReport — 집중 차원 + 전체 분해 + 요약.
         """
+        metrics = metrics or NULL_METRICS
+
         # 1. 사용 가능한 차원 자동 탐지
         dimensions = repo.get_available_dimensions(game_id)
 
@@ -168,8 +175,11 @@ class SegmentationAnalyzer:
         )
 
         # 3. LLM에게 집중 차원 식별 요청
-        return self._chain.invoke({
-            "game_id": game_id,
-            "metric_label": anomaly.metric_label,
-            "segmented_json": json.dumps(segmented, ensure_ascii=False),
-        })
+        return self._chain.invoke(
+            {
+                "game_id": game_id,
+                "metric_label": anomaly.metric_label,
+                "segmented_json": json.dumps(segmented, ensure_ascii=False),
+            },
+            config={"callbacks": [metrics]},
+        )

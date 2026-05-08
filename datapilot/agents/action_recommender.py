@@ -22,12 +22,14 @@ import json
 from typing import Any, Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.agents.root_cause_reasoner import RootCauseReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.observability import NULL_METRICS
 
 # ------------------------------------------------------------------
 # 출력 스키마 (Pydantic)
@@ -162,24 +164,31 @@ class ActionRecommender:
     def recommend(
         self,
         root_cause_report: RootCauseReport,
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> ActionPlan:
         """인과 체인을 받아 실행 가능한 액션을 제안한다.
 
         Args:
             root_cause_report: ⑤ 의 근본 원인 추론 결과.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             ActionPlan -- 단기/중기 액션 목록 + 보조 메시지.
         """
+        metrics = metrics or NULL_METRICS
         prepared = prepare_input(root_cause_report)
 
-        return self._chain.invoke({
-            "anomaly": prepared["anomaly"],
-            "root_cause_json": json.dumps(
-                prepared["root_cause"], ensure_ascii=False,
-            ),
-            "additional_investigation_json": json.dumps(
-                prepared["additional_investigation"], ensure_ascii=False,
-            ),
-            "is_unknown_cause": str(prepared["is_unknown_cause"]),
-        })
+        return self._chain.invoke(
+            {
+                "anomaly": prepared["anomaly"],
+                "root_cause_json": json.dumps(
+                    prepared["root_cause"], ensure_ascii=False,
+                ),
+                "additional_investigation_json": json.dumps(
+                    prepared["additional_investigation"], ensure_ascii=False,
+                ),
+                "is_unknown_cause": str(prepared["is_unknown_cause"]),
+            },
+            config={"callbacks": [metrics]},
+        )

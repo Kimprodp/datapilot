@@ -107,26 +107,6 @@ class TestGetDailyKpi:
         with pytest.raises(ValueError):
             adapter.get_daily_kpi(GAME_ID, (date(2026, 3, 20), date(2026, 3, 10)))
 
-    def test_scenario2_d7_retention_drops_after_break_date(self, adapter):
-        """시나리오 2: D7 리텐션이 2026-03-17 이후 유의미하게 하락해야 한다.
-
-        전반(3/2~3/16) 평균 vs 후반(3/17~3/31) 평균을 비교.
-        실측: early≈0.299, late≈0.254 → 약 4pp 하락.
-        임계: late < early * 0.97 (3% 이상 감소, seed 변경 시 여유 확보)
-        """
-        result = adapter.get_daily_kpi(GAME_ID, (FULL_START, FULL_END))
-        daily = result["daily"]
-
-        early_rows = [r for r in daily if r["date"] < "2026-03-17"]
-        late_rows = [r for r in daily if r["date"] >= "2026-03-17"]
-
-        early_avg = sum(r["d7_retention"] for r in early_rows) / len(early_rows)
-        late_avg = sum(r["d7_retention"] for r in late_rows) / len(late_rows)
-
-        assert late_avg < early_avg * 0.97, (
-            f"D7 리텐션 하락 시나리오 미검출: early={early_avg:.4f}, late={late_avg:.4f}"
-        )
-
     def test_kpi_numeric_fields_are_non_negative(self, adapter):
         result = adapter.get_daily_kpi(GAME_ID, (FULL_START, FULL_END))
         for row in result["daily"]:

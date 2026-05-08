@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -26,6 +27,7 @@ from pydantic import BaseModel, Field
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.segmentation_analyzer import SegmentationReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, OPUS_MODEL
+from datapilot.observability import NULL_METRICS
 from datapilot.repository.port import GameDataRepository
 
 # ──────────────────────────────────────────────────────────────────
@@ -148,6 +150,8 @@ class HypothesisGenerator:
         anomaly: AnomalyItem,
         segmentation: SegmentationReport,
         repo: GameDataRepository,
+        *,
+        metrics: BaseCallbackHandler | None = None,
     ) -> HypothesisList:
         """가설을 발산한다.
 
@@ -156,10 +160,12 @@ class HypothesisGenerator:
             anomaly: ① 이 탐지한 이상 지표.
             segmentation: ② 의 세그먼트 분석 결과.
             repo: 가용 스키마 조회용 Port.
+            metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
             HypothesisList — 최대 5개 가설 목록.
         """
+        metrics = metrics or NULL_METRICS
         full_schema = repo.get_available_schema(game_id)
         # 가설 생성에는 테이블명 + 설명만 전달 (토큰 절감)
         # 컬럼 상세는 ④ Data Validator가 SQL 작성 시 사용
@@ -170,11 +176,14 @@ class HypothesisGenerator:
             ]
         }
 
-        return self._chain.invoke({
-            "game_id": game_id,
-            "anomaly_json": anomaly.model_dump_json(),
-            "segmentation_json": segmentation.model_dump_json(),
-            "available_schema_json": json.dumps(
-                light_schema, ensure_ascii=False,
-            ),
-        })
+        return self._chain.invoke(
+            {
+                "game_id": game_id,
+                "anomaly_json": anomaly.model_dump_json(),
+                "segmentation_json": segmentation.model_dump_json(),
+                "available_schema_json": json.dumps(
+                    light_schema, ensure_ascii=False,
+                ),
+            },
+            config={"callbacks": [metrics]},
+        )
