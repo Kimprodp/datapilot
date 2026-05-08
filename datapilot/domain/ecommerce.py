@@ -21,12 +21,25 @@ ECOMMERCE = DomainConfig(
         "products",
         "promotions",
         "category_daily_revenue",
+        "inventory_changes",
     }),
+    # segment 분해 가능 KPI = orders 테이블 + customers JOIN 으로 계산되는 것들.
+    # conversion / payment_success_rate / visitors 는 daily_kpi 만 있고 raw 테이블
+    # 에서 segment 별 분해 불가능 — segmentable 에서 제외 (Bottleneck Detector 가
+    # 탐지하면 "세부 분석 미지원 지표" 카드로 표시).
     supported_segment_metrics=frozenset({
         "gmv",
-        "payment_success_rate",
-        "conversion",
+        "orders",
     }),
+    table_descriptions={
+        "daily_kpi": "일별 KPI 집계 (gmv/orders/conversion/visitors/payment_success_rate). ① Bottleneck Detector 입력",
+        "customers": "고객 마스터 (세그먼트 차원: country, customer_type[new/returning/vip], device). ② SegmentationAnalyzer 의 GROUP BY 대상",
+        "orders": "주문 이벤트 (customer_id, category, product_id, amount, promotion_id, paid_at). 시점별 매출/주문수/카테고리 분해 + 프로모션 적용 추적",
+        "products": "상품 마스터 (category, inventory_status[in_stock/out_of_stock/discontinued], name). 현재 재고 상태 확인",
+        "promotions": "프로모션 이력 (started_at, ended_at, type, discount_rate). 프로모션 시작/종료 시점과 매출 변동 연관 분석에 활용",
+        "category_daily_revenue": "카테고리별 일별 매출 집계 (date, category, gmv, orders). 카테고리 매출 변동 / 인기 카테고리 영향 추적",
+        "inventory_changes": "재고 상태 시점별 변경 이력 (product_id, changed_at, status, note). 재고 부족 / 품절 영향 분석에 활용",
+    },
     ui_labels=UILabels(
         industry_name="이커머스",
         entity_default_id="ecommerce_demo",

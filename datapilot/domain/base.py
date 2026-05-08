@@ -65,6 +65,14 @@ class DomainConfig:
     supported_segment_metrics: frozenset[str]
     """② SegmentationAnalyzer 가 분해 가능한 KPI 코드 집합."""
 
+    table_descriptions: dict[str, str]
+    """테이블 코드명 → 한글 설명 (분석 활용도 시사).
+
+    ③ HypothesisGenerator 가 가용 스키마를 받을 때 이 설명이 함께 전달되어
+    가설 발산 방향성을 잡아준다. 예: ``"inventory_changes": "재고 상태 시점별
+    변경 이력. 재고 부족 / 품절 영향 분석에 활용"``.
+    """
+
     ui_labels: UILabels
 
     agent_keywords: DomainKeywords

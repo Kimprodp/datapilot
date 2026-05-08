@@ -98,6 +98,7 @@ class TestMakeRepositoryErrors:
             db_path=str(tmp_path / "nonexistent.db"),
             allowed_tables=frozenset({"foo"}),
             supported_segment_metrics=frozenset({"bar"}),
+            table_descriptions={"foo": "fake table"},
             ui_labels=UILabels(
                 industry_name="가짜",
                 entity_default_id="fake_demo",

@@ -89,6 +89,26 @@ class TestDomainConfigFields:
         name, cfg = domain
         assert isinstance(cfg.agent_keywords, DomainKeywords)
 
+    def test_table_descriptions_covers_allowed_tables(self, domain):
+        """allowed_tables 의 모든 테이블에 설명이 있어야 한다.
+
+        ③ HypothesisGenerator 가 가용 스키마 받을 때 description 이 비면
+        가설 발산 방향성 약해짐 → 정답 도출 정확도 ↓.
+        """
+        name, cfg = domain
+        assert isinstance(cfg.table_descriptions, dict)
+        missing = cfg.allowed_tables - set(cfg.table_descriptions.keys())
+        assert not missing, (
+            f"{name}: allowed_tables 중 설명 누락: {missing}"
+        )
+
+    def test_table_descriptions_values_non_empty(self, domain):
+        name, cfg = domain
+        for table, desc in cfg.table_descriptions.items():
+            assert desc.strip(), (
+                f"{name}: table_descriptions[{table!r}] 가 빈 문자열"
+            )
+
 
 # ════════════════════════════════════════════════════════════════════
 # 3. UILabels 필드 무결성
