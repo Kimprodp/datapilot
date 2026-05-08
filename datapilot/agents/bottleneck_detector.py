@@ -28,6 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.domain.base import DomainKeywords
 from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
@@ -169,7 +170,14 @@ class BottleneckDetector:
         }
     """
 
-    def __init__(self, *, llm: BaseChatModel | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm: BaseChatModel | None = None,
+        domain_keywords: DomainKeywords | None = None,
+    ) -> None:
+        # ① 은 시계열 수치 비교라 도메인 키워드 미사용 (균일 시그니처용 인자)
+        self._domain_keywords = domain_keywords
         if llm is None:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,

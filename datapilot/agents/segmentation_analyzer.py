@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.domain.base import DomainKeywords
 from datapilot.observability import NULL_METRICS
 from datapilot.repository.port import DataRepository
 
@@ -92,7 +93,7 @@ concentration에 교차된 조합을 명시한다.
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
 USER_PROMPT_TEMPLATE = """\
-다음은 게임 {game_id}의 이상 지표 "{metric_label}"에 대한 세그먼트별 raw 시계열이다.
+다음은 게임 {entity_id}의 이상 지표 "{metric_label}"에 대한 세그먼트별 raw 시계열이다.
 
 {segmented_json}
 
@@ -134,7 +135,14 @@ class SegmentationAnalyzer:
         }
     """
 
-    def __init__(self, *, llm: BaseChatModel | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm: BaseChatModel | None = None,
+        domain_keywords: DomainKeywords | None = None,
+    ) -> None:
+        # ② 는 세그먼트 패턴 식별이라 도메인 키워드 미사용 (균일 시그니처용 인자)
+        self._domain_keywords = domain_keywords
         if llm is None:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
@@ -152,7 +160,7 @@ class SegmentationAnalyzer:
 
     def analyze(
         self,
-        game_id: str,
+        entity_id: str,
         anomaly: AnomalyItem,
         period: tuple[date, date],
         repo: DataRepository,
@@ -162,7 +170,7 @@ class SegmentationAnalyzer:
         """이상 지표를 세그먼트 차원으로 분해 분석한다.
 
         Args:
-            game_id: 게임 식별자.
+            entity_id: 분석 대상 식별자 (게임 ID / 스토어 ID 등).
             anomaly: ① Bottleneck Detector가 탐지한 이상 지표.
             period: (시작일, 종료일) inclusive.
             repo: 데이터 조회용 Port.
@@ -174,11 +182,11 @@ class SegmentationAnalyzer:
         metrics = metrics or NULL_METRICS
 
         # 1. 사용 가능한 차원 자동 탐지
-        dimensions = repo.get_available_dimensions(game_id)
+        dimensions = repo.get_available_dimensions(entity_id)
 
         # 2. 모든 차원에 대해 세그먼트별 시계열 조회
         segmented = repo.get_metric_by_segments(
-            entity_id=game_id,
+            entity_id=entity_id,
             metric=anomaly.metric,
             period=period,
             dimensions=dimensions,
@@ -187,7 +195,7 @@ class SegmentationAnalyzer:
         # 3. LLM에게 집중 차원 식별 요청
         return self._chain.invoke(
             {
-                "game_id": game_id,
+                "entity_id": entity_id,
                 "metric_label": anomaly.metric_label,
                 "segmented_json": json.dumps(segmented, ensure_ascii=False),
             },
