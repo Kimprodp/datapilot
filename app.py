@@ -333,18 +333,15 @@ _STEP_LABELS = {
     "root_cause": "원인 추론",
     "action": "액션 제안",
 }
-_METRIC_DISPLAY: dict[str, str] = {
-    "revenue": "인앱결제 매출",
-    "dau": "DAU",
-    "payment_success_rate": "결제 성공률",
-    "d1_retention": "D1 리텐션",
-    "d7_retention": "D7 리텐션",
-    "arppu": "유저당 평균 결제액",
-    "new_installs": "신규 설치",
-    "sessions": "세션 수",
-    "avg_session_sec": "평균 세션 길이",
-    "mau": "MAU",
-}
+def _metric_display(metric: str, domain: str | None = None) -> str:
+    """카드 라벨용 metric 표시명 — "{한글명}({영문코드})" 형식.
+
+    도메인의 ``ui_labels.kpi_korean`` 에서 한글명을 찾고, 없으면 metric 코드를
+    그대로 노출 (legacy fallback).
+    """
+    domain = domain or st.session_state.get("domain", "game")
+    korean = DOMAINS[domain].ui_labels.kpi_korean.get(metric)
+    return f"{korean}({metric})" if korean else metric
 
 
 def _step_box_html(text: str, status: str) -> str:
@@ -402,9 +399,13 @@ def page_running() -> None:
         date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
     else:
         date_range = st.session_state.period_label
-    st.subheader(
+    st.markdown(
+        f"<div style='font-size:18px;font-weight:600;color:#333;"
+        f"margin-top:8px;margin-bottom:16px;'>"
         f"{st.session_state.industry_name} 업종의 ({date_range}) "
         f"데모 데이터를 분석 중입니다..."
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
     detection_ph = st.empty()
@@ -454,13 +455,11 @@ def page_running() -> None:
             cards_ph.empty()
             return
         html = (
-            "<div style='font-size:13px;font-weight:600;color:#888;"
-            "margin-top:8px;margin-bottom:4px;'>이상 지표별 상세 분석</div>"
-            "<div style='font-size:11px;color:#aaa;margin-bottom:12px;'>"
-            "이상 지표 수에 따라 약 5~10분 소요될 수 있습니다.</div>"
+            "<div style='font-size:18px;font-weight:700;color:#333;"
+            "margin-top:16px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
         )
         for metric in card_order:
-            base_label = _METRIC_DISPLAY.get(metric, metric)
+            base_label = _metric_display(metric)
             direction = metric_direction.get(metric, "")
             label = f"{base_label} {direction}".strip()
 
@@ -558,9 +557,9 @@ def page_running() -> None:
     render_detection()
 
     def _run_pipeline() -> PipelineReport:
-        if st.session_state.get("is_demo", False):
-            return run_demo(on_step=on_step)
         domain = st.session_state.domain
+        if st.session_state.get("is_demo", False):
+            return run_demo(domain, on_step=on_step)
         with make_repository(domain) as repo:
             agents = AgentBundle.create(domain, repo=repo)
             return PipelineOrchestrator(repo, agents=agents).run(
