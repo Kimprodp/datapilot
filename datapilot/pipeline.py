@@ -32,6 +32,7 @@ from datapilot.agents.bottleneck_detector import (
     AnomalyItem,
     BottleneckDetector,
 )
+from datapilot.agents.bundle import AgentBundle
 from datapilot.agents.data_validator import DataValidator, ValidationResult
 from datapilot.agents.hypothesis_generator import HypothesisGenerator, HypothesisList
 from datapilot.agents.root_cause_reasoner import RootCauseReasoner, RootCauseReport
@@ -71,7 +72,7 @@ class UnanalyzedAnomaly(BaseModel):
 class PipelineReport(BaseModel):
     """파이프라인 전체 출력. Streamlit UI의 데이터 소스."""
 
-    game_id: str
+    entity_id: str
     period_from: str = Field(description="시작일 ISO format")
     period_to: str = Field(description="종료일 ISO format")
     analyzed: list[AnomalyAnalysis] = Field(
@@ -128,18 +129,26 @@ class PipelineOrchestrator:
         ) { ... }
     """
 
-    def __init__(self, repo: DataRepository) -> None:
+    def __init__(
+        self,
+        repo: DataRepository,
+        *,
+        agents: AgentBundle | None = None,
+    ) -> None:
         self._repo = repo
-        self._detector = BottleneckDetector()
-        self._segmenter = SegmentationAnalyzer()
-        self._hypothesis_gen = HypothesisGenerator()
-        self._validator = DataValidator(repo=repo)
-        self._reasoner = RootCauseReasoner()
-        self._recommender = ActionRecommender()
+        # agents=None 이면 게임 도메인 디폴트 (백워드 호환)
+        if agents is None:
+            agents = AgentBundle.create("game", repo=repo)
+        self._detector = agents.bottleneck
+        self._segmenter = agents.segmenter
+        self._hypothesis_gen = agents.hypothesis
+        self._validator = agents.validator
+        self._reasoner = agents.reasoner
+        self._recommender = agents.recommender
 
     def run(
         self,
-        game_id: str,
+        entity_id: str,
         period: tuple[date, date],
         *,
         on_step: OnStepCallback = None,
@@ -148,7 +157,7 @@ class PipelineOrchestrator:
         """파이프라인을 실행한다.
 
         Args:
-            game_id: 게임 식별자.
+            entity_id: 분석 대상 식별자 (게임 ID / 스토어 ID 등).
             period: (시작일, 종료일) inclusive.
             on_step: 에이전트 단계별 콜백 (Streamlit 연동용).
             metrics: 단계별 latency / 토큰 / cache 측정용 collector.
@@ -171,7 +180,7 @@ class PipelineOrchestrator:
         try:
             # ── ① 병목 탐지 ──────────────────────────────────────
             _notify("bottleneck", "active")
-            kpi_series = self._repo.get_daily_kpi(game_id, period)
+            kpi_series = self._repo.get_daily_kpi(entity_id, period)
             with m.span("bottleneck"):
                 anomaly_report = self._detector.detect(kpi_series, metrics=m)
             n = len(anomaly_report.anomalies)
@@ -200,7 +209,7 @@ class PipelineOrchestrator:
 
             # 스키마는 segmentable이 있을 때만 1회 조회 (불필요한 DB I/O 방지)
             available_schema = (
-                self._repo.get_available_schema(game_id) if segmentable else {}
+                self._repo.get_available_schema(entity_id) if segmentable else {}
             )
 
             # ── 미지원 지표 먼저 알림 (화면2에 카드 즉시 표시) ────
@@ -213,11 +222,11 @@ class PipelineOrchestrator:
             analyzed: list[AnomalyAnalysis] = []
             for anomaly in segmentable:
                 analyzed.append(self._analyze_one(
-                    game_id, anomaly, period, available_schema, _notify, m,
+                    entity_id, anomaly, period, available_schema, _notify, m,
                 ))
 
             return PipelineReport(
-                game_id=game_id,
+                entity_id=entity_id,
                 period_from=period[0].isoformat(),
                 period_to=period[1].isoformat(),
                 analyzed=analyzed,
@@ -240,7 +249,7 @@ class PipelineOrchestrator:
 
     def _analyze_one(
         self,
-        game_id: str,
+        entity_id: str,
         anomaly: AnomalyItem,
         period: tuple[date, date],
         available_schema: dict[str, Any],
@@ -259,7 +268,7 @@ class PipelineOrchestrator:
             notify("segmentation", "active", m, metric=m)
             with metrics.span("segmentation", metric=m):
                 segmentation = self._segmenter.analyze(
-                    game_id, anomaly, period, repo, metrics=metrics,
+                    entity_id, anomaly, period, repo, metrics=metrics,
                 )
             notify("segmentation", "done", segmentation.concentration.focus, metric=m)
 
@@ -268,7 +277,7 @@ class PipelineOrchestrator:
             notify("hypothesis", "active", m, metric=m)
             with metrics.span("hypothesis", metric=m):
                 hypotheses = self._hypothesis_gen.generate(
-                    game_id, anomaly, segmentation, repo, metrics=metrics,
+                    entity_id, anomaly, segmentation, repo, metrics=metrics,
                 )
             notify("hypothesis", "done", f"가설 {len(hypotheses.hypotheses)}개", metric=m)
 

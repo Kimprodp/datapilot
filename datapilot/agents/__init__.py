@@ -13,6 +13,7 @@
 
 from datapilot.agents.action_recommender import ActionPlan, ActionRecommender
 from datapilot.agents.bottleneck_detector import AnomalyReport, BottleneckDetector
+from datapilot.agents.bundle import AgentBundle
 from datapilot.agents.data_validator import DataValidator, ValidationResult
 from datapilot.agents.hypothesis_generator import HypothesisGenerator, HypothesisList
 from datapilot.agents.root_cause_reasoner import RootCauseReasoner, RootCauseReport
@@ -40,4 +41,6 @@ __all__ = [
     # 6 Action Recommender
     "ActionRecommender",
     "ActionPlan",
+    # 6 에이전트 묶음 (도메인 키워드 주입)
+    "AgentBundle",
 ]

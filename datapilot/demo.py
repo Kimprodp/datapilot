@@ -667,7 +667,7 @@ def build_demo_report() -> PipelineReport:
     anomaly_order는 ① 병목 탐지 보고 순서를 따른다.
     """
     return PipelineReport(
-        game_id="pizza_ready",
+        entity_id="pizza_ready",
         period_from="2026-03-02",
         period_to="2026-03-31",
         analyzed=[
