@@ -28,6 +28,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.domain.base import DomainKeywords
 from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
@@ -135,7 +136,7 @@ _SYSTEM_BLOCKS = [
 ]
 
 USER_PROMPT_TEMPLATE = """\
-다음은 게임 {game_id}의 최근 {days}일 KPI 시계열이다.
+다음은 {entity_id} 의 최근 {days}일 KPI 시계열이다.
 
 {kpi_series_json}
 
@@ -169,7 +170,14 @@ class BottleneckDetector:
         }
     """
 
-    def __init__(self, *, llm: BaseChatModel | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm: BaseChatModel | None = None,
+        domain_keywords: DomainKeywords | None = None,
+    ) -> None:
+        # ① 은 시계열 수치 비교라 도메인 키워드 미사용 (균일 시그니처용 인자)
+        self._domain_keywords = domain_keywords
         if llm is None:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
@@ -192,7 +200,7 @@ class BottleneckDetector:
         """KPI 시계열을 분석해 이상 지표를 탐지한다.
 
         Args:
-            kpi_series: ``GameDataRepository.get_daily_kpi()`` 반환값.
+            kpi_series: ``DataRepository.get_daily_kpi()`` 반환값.
             metrics: LLM 호출 usage 측정용 callback. None 이면 no-op.
 
         Returns:
@@ -201,7 +209,7 @@ class BottleneckDetector:
         metrics = metrics or NULL_METRICS
         return self._chain.invoke(
             {
-                "game_id": kpi_series["game_id"],
+                "entity_id": kpi_series["entity_id"],
                 "days": len(kpi_series["daily"]),
                 "kpi_series_json": json.dumps(
                     kpi_series["daily"], ensure_ascii=False,

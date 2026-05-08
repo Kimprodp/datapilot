@@ -1,4 +1,4 @@
-"""BigQuery 기반 GameDataRepository 스텁 (미구현).
+"""BigQuery 기반 DataRepository 스텁 (미구현).
 
 Phase 5 시점에서는 스텁만 제공한다. Port/Adapter 패턴이 "어댑터 교체로
 DuckDB → BigQuery 전환 가능"임을 코드로 증명하는 목적이다.
@@ -11,7 +11,7 @@ DuckDB → BigQuery 전환 가능"임을 코드로 증명하는 목적이다.
     4. 파라미터 바인딩은 `bigquery.ScalarQueryParameter` 사용
 
 Java 비유:
-    public class BigQueryGameDataRepository implements GameDataRepository {
+    public class BigQueryDataRepository implements DataRepository {
         // 구현 전까지는 모든 메서드가 UnsupportedOperationException 던짐
     }
 """
@@ -21,10 +21,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 
-class BigQueryAdapter(GameDataRepository):
+class BigQueryAdapter(DataRepository):
     """운영 환경용 BigQueryAdapter 스텁.
 
     Example 사용 예시 (구현 시):
@@ -32,7 +32,7 @@ class BigQueryAdapter(GameDataRepository):
             project_id="supercent-game-analytics",
             dataset_id="pizza_ready_prod",
         )
-        repo: GameDataRepository = adapter
+        repo: DataRepository = adapter
     """
 
     def __init__(self, project_id: str, dataset_id: str) -> None:
@@ -48,18 +48,18 @@ class BigQueryAdapter(GameDataRepository):
 
     def get_daily_kpi(
         self,
-        game_id: str,
+        entity_id: str,
         period: tuple[date, date],
     ) -> dict[str, Any]:
         # 구현 예시 (BigQuery Standard SQL):
         #   SELECT date, dau, mau, revenue, ...
         #   FROM `{project}.{dataset}.daily_kpi`
-        #   WHERE game_id = @game_id
+        #   WHERE entity_id = @entity_id
         #     AND date BETWEEN @start AND @end
         #   ORDER BY date
         raise self._not_implemented("get_daily_kpi")
 
-    def get_available_dimensions(self, game_id: str) -> list[str]:
+    def get_available_dimensions(self, entity_id: str) -> list[str]:
         # 구현 예시:
         #   SELECT column_name
         #   FROM `{project}.{dataset}`.INFORMATION_SCHEMA.COLUMNS
@@ -68,7 +68,7 @@ class BigQueryAdapter(GameDataRepository):
 
     def get_metric_by_segments(
         self,
-        game_id: str,
+        entity_id: str,
         metric: str,
         period: tuple[date, date],
         dimensions: list[str],
@@ -78,7 +78,7 @@ class BigQueryAdapter(GameDataRepository):
         # DuckDBAdapter와 동일한 안전 로직을 재사용해야 한다.
         raise self._not_implemented("get_metric_by_segments")
 
-    def get_available_schema(self, game_id: str) -> dict[str, Any]:
+    def get_available_schema(self, entity_id: str) -> dict[str, Any]:
         # 구현 예시:
         #   SELECT table_name, column_name
         #   FROM `{project}.{dataset}`.INFORMATION_SCHEMA.COLUMNS

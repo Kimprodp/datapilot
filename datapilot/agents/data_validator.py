@@ -17,7 +17,7 @@ Java 비유:
     @Service
     public class DataValidatorService {
         private final ChatModel llm;
-        private final GameDataRepository repo;
+        private final DataRepository repo;
         // LLM이 Tool Use로 repo.executeReadonlySql()를 호출
     }
 """
@@ -38,8 +38,9 @@ from pydantic import BaseModel, Field
 
 from datapilot.agents.hypothesis_generator import Hypothesis, HypothesisList
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.domain.base import DomainKeywords
 from datapilot.observability import NULL_METRICS
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ──────────────────────────────────────────────────────────────────
 # 상수
@@ -236,7 +237,7 @@ class DataValidator:
 
         public DataValidatorService(
             @Autowired ChatModel llm,
-            @Autowired GameDataRepository repo
+            @Autowired DataRepository repo
         ) { ... }
     """
 
@@ -244,9 +245,17 @@ class DataValidator:
         self,
         *,
         llm: BaseChatModel | None = None,
-        repo: GameDataRepository,
+        repo: DataRepository,
+        domain_keywords: DomainKeywords | None = None,
+        allowed_tables: frozenset[str] | None = None,
     ) -> None:
         self._repo = repo
+        # ④ 는 SQL 실행 안전성이 핵심이라 도메인 키워드 미사용 (균일 시그니처용 인자)
+        self._domain_keywords = domain_keywords
+        # 도메인이 지정한 테이블 화이트리스트. validate 호출 시 schema 테이블과
+        # 교집합으로 사용 (이중 안전장치). None 이면 schema 기반만.
+        self._domain_allowed_tables = allowed_tables
+
         base_llm = llm or ChatAnthropic(
             model=SONNET_MODEL,
             api_key=ANTHROPIC_API_KEY,
@@ -356,8 +365,15 @@ class DataValidator:
             각 가설에 대한 ValidationResult 리스트 (입력 순서 유지).
         """
         metrics = metrics or NULL_METRICS
-        self._allowed_tables = frozenset(
+        schema_tables = frozenset(
             t["name"] for t in available_schema["tables"]
+        )
+        # 도메인 화이트리스트가 있으면 교집합 (이중 안전장치) — 둘 중 하나라도
+        # 누락한 테이블은 차단. 없으면 schema 기반만 (백워드 호환).
+        self._allowed_tables = (
+            self._domain_allowed_tables & schema_tables
+            if self._domain_allowed_tables is not None
+            else schema_tables
         )
 
         # 1. 분류: verifiable / unverifiable 분리

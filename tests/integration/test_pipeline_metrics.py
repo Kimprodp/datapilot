@@ -40,7 +40,7 @@ from datapilot.agents.segmentation_analyzer import (
 )
 from datapilot.observability import MetricsCollector
 from datapilot.pipeline import PipelineOrchestrator
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 # ─── 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -127,8 +127,8 @@ def _action_plan() -> ActionPlan:
 
 
 def _make_mock_repo() -> MagicMock:
-    repo = MagicMock(spec=GameDataRepository)
-    repo.get_daily_kpi.return_value = {"game_id": _GAME_ID, "daily": []}
+    repo = MagicMock(spec=DataRepository)
+    repo.get_daily_kpi.return_value = {"entity_id": _GAME_ID, "daily": []}
     repo.get_available_schema.return_value = {
         "tables": [{"name": "payments", "columns": [], "description": ""}]
     }
@@ -232,7 +232,7 @@ class TestRegressionWithoutMetrics:
 
         report = orch.run(_GAME_ID, _PERIOD)  # metrics 인자 없음
 
-        assert report.game_id == _GAME_ID
+        assert report.entity_id == _GAME_ID
         assert len(report.analyzed) == 1
         assert not (tmp_path / ".logs").exists()  # NULL 은 파일 미생성
 
@@ -242,7 +242,7 @@ class TestRegressionWithoutMetrics:
 
         report = orch.run(_GAME_ID, _PERIOD, metrics=None)
 
-        assert report.game_id == _GAME_ID
+        assert report.entity_id == _GAME_ID
         assert not (tmp_path / ".logs").exists()
 
 
@@ -327,6 +327,6 @@ class TestFlushDegraded:
         with patch.object(m, "flush", side_effect=RuntimeError("flush oops")):
             report = orch.run(_GAME_ID, _PERIOD, metrics=m)
 
-        assert report.game_id == _GAME_ID  # 분석 결과 보존
+        assert report.entity_id == _GAME_ID  # 분석 결과 보존
         captured = capsys.readouterr()
         assert "flush failed" in captured.err

@@ -91,9 +91,9 @@ def test_adapter_stores_project_and_dataset_ids():
 
 
 def test_adapter_is_instance_of_game_data_repository():
-    """BigQueryAdapter는 GameDataRepository를 구현해야 한다 (is-a 관계)."""
-    from datapilot.repository.port import GameDataRepository
+    """BigQueryAdapter는 DataRepository를 구현해야 한다 (is-a 관계)."""
+    from datapilot.repository.port import DataRepository
 
     adapter = BigQueryAdapter(project_id="p", dataset_id="d")
 
-    assert isinstance(adapter, GameDataRepository)
+    assert isinstance(adapter, DataRepository)

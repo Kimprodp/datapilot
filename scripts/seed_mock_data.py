@@ -1,11 +1,11 @@
 """
 Mock 데이터 생성 스크립트
 
-DuckDB 파일(data/datapilot_mock.db)에 12개 테이블을 생성하고
-Pizza Ready 30일치 Mock 데이터를 삽입한다.
-2개 시나리오가 매립되어 있다:
-- Android UI 변경 (3/28) → 인앱결제 매출 ↓
-- PG 장애 PagSeguro (3/31) → 결제 성공률 ↓
+DuckDB 파일에 도메인별 mock 을 생성한다.
+- 게임 (data/mock/game.db): 12 테이블 + Pizza Ready 30일치 데이터.
+  2개 시나리오: Android UI 변경 (3/28) / PG 장애 PagSeguro (3/31).
+- 이커머스 (data/mock/ecommerce.db): 6 테이블 빈 스키마.
+  데이터 매립은 후속 task (이커머스 mock seed) 에서.
 
 실행: uv run python scripts/seed_mock_data.py
 """
@@ -16,7 +16,9 @@ from datetime import date, datetime, timedelta
 import duckdb
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "data" / "datapilot_mock.db"
+DATA_DIR = Path(__file__).parent.parent / "data" / "mock"
+DB_PATH = DATA_DIR / "game.db"
+ECOMMERCE_DB_PATH = DATA_DIR / "ecommerce.db"
 BASE_DATE = date(2026, 3, 31)   # 데이터 기간 마지막 날
 PERIOD_DAYS = 30                # 30일치
 NUM_USERS = 3000                # Mock 유저 수 (D7 코호트 일 ~25명, 실행 시간 절충)
@@ -699,16 +701,331 @@ def seed_daily_kpi(conn: duckdb.DuckDBPyConnection):
     print(f"daily_kpi: {count}건 삽입")
 
 
+# ──────────────────────────────────────────────────────────────────
+# 이커머스 mock — 시나리오 2 개 매립
+# ──────────────────────────────────────────────────────────────────
+
+ECOMMERCE_BASE_DATE = date(2026, 3, 31)
+ECOMMERCE_PERIOD_DAYS = 30
+ECOMMERCE_START = ECOMMERCE_BASE_DATE - timedelta(days=ECOMMERCE_PERIOD_DAYS - 1)
+NUM_CUSTOMERS = 1000
+
+#: 시나리오 B (재고 부족) — D-7 부터 kitchen 카테고리 인기 상품 품절
+INVENTORY_OUT_DATE = ECOMMERCE_BASE_DATE - timedelta(days=7)  # 2026-03-24
+TOP_KITCHEN_PRODUCT = "p_kitchen_01"
+
+ECOMMERCE_CATEGORIES = ["kitchen", "fashion", "electronics", "beauty"]
+PRODUCTS_PER_CATEGORY = 5
+
+ECOMMERCE_COUNTRIES = ["korea", "usa", "japan", "germany"]
+ECOMMERCE_CUSTOMER_TYPES = ["new", "returning", "vip"]
+ECOMMERCE_DEVICES = ["mobile", "desktop", "tablet"]
+
+
+def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
+    """이커머스 mock 의 6 테이블 빈 스키마 생성.
+
+    스키마는 docs/features/domain-extension/tech-spec.md §4 정의를 따른다.
+    """
+
+    conn.execute("DROP TABLE IF EXISTS daily_kpi")
+    conn.execute("DROP TABLE IF EXISTS customers")
+    conn.execute("DROP TABLE IF EXISTS orders")
+    conn.execute("DROP TABLE IF EXISTS products")
+    conn.execute("DROP TABLE IF EXISTS category_daily_revenue")
+    conn.execute("DROP TABLE IF EXISTS inventory_changes")
+
+    conn.execute("""
+        CREATE TABLE daily_kpi (
+            date                 DATE    PRIMARY KEY,
+            gmv                  DECIMAL NOT NULL,
+            orders               INTEGER NOT NULL,
+            conversion           DECIMAL NOT NULL,  -- 0~1
+            visitors             INTEGER NOT NULL,
+            payment_success_rate DECIMAL NOT NULL   -- 0~1
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE customers (
+            customer_id   VARCHAR PRIMARY KEY,
+            country       VARCHAR,
+            customer_type VARCHAR,  -- new / returning / vip
+            device        VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE products (
+            product_id        VARCHAR PRIMARY KEY,
+            category          VARCHAR NOT NULL,
+            inventory_status  VARCHAR NOT NULL,  -- in_stock / out_of_stock / discontinued
+            name              VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE orders (
+            order_id      VARCHAR PRIMARY KEY,
+            customer_id   VARCHAR,
+            category      VARCHAR,
+            product_id    VARCHAR,
+            amount        DECIMAL NOT NULL,
+            paid_at       TIMESTAMP NOT NULL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE category_daily_revenue (
+            date     DATE NOT NULL,
+            category VARCHAR NOT NULL,
+            gmv      DECIMAL NOT NULL,
+            orders   INTEGER NOT NULL,
+            PRIMARY KEY (date, category)
+        )
+    """)
+
+    # 시점별 재고 상태 변경 이력 — ④ Validator 가 "D-7 부터 품절" 같은
+    # 시점별 SQL 검증을 할 수 있도록.
+    conn.execute("""
+        CREATE TABLE inventory_changes (
+            change_id   VARCHAR PRIMARY KEY,
+            product_id  VARCHAR NOT NULL,
+            changed_at  TIMESTAMP NOT NULL,
+            status      VARCHAR NOT NULL,  -- in_stock / out_of_stock / discontinued
+            note        VARCHAR
+        )
+    """)
+
+
+def seed_ecommerce_customers(conn: duckdb.DuckDBPyConnection):
+    """1000 명 customer. country/customer_type/device 자연 분포."""
+    rows = []
+    for i in range(NUM_CUSTOMERS):
+        country = random.choices(
+            ECOMMERCE_COUNTRIES, weights=[0.4, 0.3, 0.2, 0.1], k=1,
+        )[0]
+        customer_type = random.choices(
+            ECOMMERCE_CUSTOMER_TYPES, weights=[0.3, 0.5, 0.2], k=1,
+        )[0]
+        device = random.choices(
+            ECOMMERCE_DEVICES, weights=[0.6, 0.3, 0.1], k=1,
+        )[0]
+        rows.append((f"c_{i:04d}", country, customer_type, device))
+    conn.executemany(
+        "INSERT INTO customers (customer_id, country, customer_type, device) "
+        "VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    print(f"customers: {len(rows)}건 삽입")
+
+
+def seed_ecommerce_products(conn: duckdb.DuckDBPyConnection):
+    """20 개 상품 (4 카테고리 × 5). p_kitchen_01 만 out_of_stock."""
+    rows = []
+    for category in ECOMMERCE_CATEGORIES:
+        for i in range(1, PRODUCTS_PER_CATEGORY + 1):
+            pid = f"p_{category}_{i:02d}"
+            # 시나리오 B: kitchen 카테고리 인기 상품 (p_kitchen_01) 만 품절
+            inventory = (
+                "out_of_stock" if pid == TOP_KITCHEN_PRODUCT else "in_stock"
+            )
+            name = f"{category.capitalize()} Item {i}"
+            rows.append((pid, category, inventory, name))
+    conn.executemany(
+        "INSERT INTO products (product_id, category, inventory_status, name) "
+        "VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    print(f"products: {len(rows)}건 삽입 (p_kitchen_01 = out_of_stock)")
+
+
+def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
+    """30 일치 일별 주문. 시나리오 B/C 시점에 변동.
+
+    - 평소: 일평균 ~500 건. 카테고리 균등 분포 (각 25%, 약 125 건/일/카테고리).
+    - D-7 부터: kitchen 카테고리에서 p_kitchen_01 (해당 카테고리의 인기 1위) 50%
+      차지하던 주문이 0 건 → kitchen 일별 주문 ~50% 감소 → 전체 ~12.5% 감소
+    - D-3 부터: spring_sale 종료. 평균 객단가 약 -20% (할인 적용 종료) →
+      gmv 약 -20% (orders 수는 영향 X — 객단가만 낮아짐)
+    """
+    rows = []
+    customer_ids = [f"c_{i:04d}" for i in range(NUM_CUSTOMERS)]
+    product_pool: dict[str, list[str]] = {
+        cat: [
+            f"p_{cat}_{i:02d}"
+            for i in range(1, PRODUCTS_PER_CATEGORY + 1)
+        ]
+        for cat in ECOMMERCE_CATEGORIES
+    }
+
+    order_seq = 0
+    for day_offset in range(ECOMMERCE_PERIOD_DAYS):
+        d = ECOMMERCE_START + timedelta(days=day_offset)
+        # 평소 일별 약 500 건
+        base_count = 500
+        # 시나리오 B: D-7 부터 kitchen 주문 약 50% ↓
+        kitchen_after_outage = d >= INVENTORY_OUT_DATE
+
+        for category in ECOMMERCE_CATEGORIES:
+            cat_count = base_count // 4  # 125 건/카테고리
+            if category == "kitchen" and kitchen_after_outage:
+                cat_count = int(cat_count * 0.5)  # ~62 건
+
+            for _ in range(cat_count):
+                customer_id = random.choice(customer_ids)
+                pids = product_pool[category]
+                # kitchen 카테고리에서는 p_kitchen_01 못 사니까 (out_of_stock)
+                # 다른 4 개 상품 중 균등 선택
+                if category == "kitchen" and kitchen_after_outage:
+                    pid = random.choice(
+                        [p for p in pids if p != TOP_KITCHEN_PRODUCT]
+                    )
+                else:
+                    pid = random.choice(pids)
+
+                # 일정 가격 분포 (시나리오 B 만 매립 — 카테고리별 주문수 변동만)
+                amount = random.uniform(3000, 5000)
+
+                rows.append((
+                    f"o_{order_seq:06d}",
+                    customer_id,
+                    category,
+                    pid,
+                    round(amount, 2),
+                    datetime.combine(d, datetime.min.time())
+                    + timedelta(seconds=random.randint(0, 86399)),
+                ))
+                order_seq += 1
+
+    conn.executemany(
+        "INSERT INTO orders "
+        "(order_id, customer_id, category, product_id, amount, paid_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    print(f"orders: {len(rows)}건 삽입")
+
+
+def seed_ecommerce_inventory_changes(conn: duckdb.DuckDBPyConnection):
+    """시점별 재고 변경 이력. 시나리오 B 의 핵심 시점 신호.
+
+    초기 상태 (D-30 시점) 모든 상품 in_stock 등록 + p_kitchen_01 의 D-7 시점
+    out_of_stock 변경 기록. ④ Validator 가 ``WHERE changed_at >= ?`` 시점별
+    SQL 로 시나리오 B 의 결정적 증거 잡을 수 있게 함.
+    """
+    rows = []
+    seq = 0
+    # 초기 등록 — 모든 상품이 데이터 시작일에 in_stock
+    init_at = datetime.combine(ECOMMERCE_START, datetime.min.time())
+    for category in ECOMMERCE_CATEGORIES:
+        for i in range(1, PRODUCTS_PER_CATEGORY + 1):
+            pid = f"p_{category}_{i:02d}"
+            rows.append((
+                f"ic_{seq:05d}",
+                pid,
+                init_at,
+                "in_stock",
+                "초기 등록",
+            ))
+            seq += 1
+
+    # 시나리오 B 핵심: D-7 (2026-03-24) 에 p_kitchen_01 out_of_stock 전환
+    rows.append((
+        f"ic_{seq:05d}",
+        TOP_KITCHEN_PRODUCT,
+        datetime.combine(INVENTORY_OUT_DATE, datetime.min.time()),
+        "out_of_stock",
+        "재고 소진 (보충 일정 미정)",
+    ))
+
+    conn.executemany(
+        "INSERT INTO inventory_changes "
+        "(change_id, product_id, changed_at, status, note) "
+        "VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+    print(
+        f"inventory_changes: {len(rows)}건 삽입 "
+        f"(p_kitchen_01 out_of_stock = {INVENTORY_OUT_DATE})"
+    )
+
+
+def seed_ecommerce_category_daily_revenue(conn: duckdb.DuckDBPyConnection):
+    """orders 집계 → category_daily_revenue."""
+    conn.execute("""
+        INSERT INTO category_daily_revenue (date, category, gmv, orders)
+        SELECT
+            CAST(paid_at AS DATE) AS date,
+            category,
+            SUM(amount) AS gmv,
+            COUNT(*) AS orders
+        FROM orders
+        GROUP BY date, category
+        ORDER BY date, category
+    """)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM category_daily_revenue"
+    ).fetchone()[0]
+    print(f"category_daily_revenue: {count}건 삽입")
+
+
+def seed_ecommerce_daily_kpi(conn: duckdb.DuckDBPyConnection):
+    """orders 집계 + 모의 visitors 로 daily_kpi 생성.
+
+    visitors 는 orders 와 **독립적으로** 일정 유지 (~15000) — 시나리오 B
+    (재고 부족) 의 진짜 원인이 "방문자 감소" 가 아닌 "전환율 하락 (재고 없음)"
+    임을 LLM 이 추론하게 하기 위함.
+    """
+    # orders 집계
+    rows = conn.execute("""
+        SELECT
+            CAST(paid_at AS DATE) AS date,
+            SUM(amount) AS gmv,
+            COUNT(*) AS orders,
+            COUNT(DISTINCT customer_id) AS unique_customers
+        FROM orders
+        GROUP BY date
+        ORDER BY date
+    """).fetchall()
+
+    insert_rows = []
+    for d, gmv, orders, _unique in rows:
+        # 방문자 = 일정 (~15000). orders 변동과 무관 — 전환율 변동으로 시나리오
+        # 신호가 노출되도록 함.
+        visitors = 15000 + random.randint(-500, 500)
+        conversion = orders / visitors if visitors else 0.0
+        # payment_success_rate — 양 도메인 안정 KPI (~0.97). 본 mock 에선 영향 X
+        psr = round(0.965 + random.uniform(-0.005, 0.010), 4)
+        insert_rows.append((
+            d,
+            round(float(gmv), 2),
+            int(orders),
+            round(conversion, 4),
+            visitors,
+            psr,
+        ))
+
+    conn.executemany(
+        "INSERT INTO daily_kpi "
+        "(date, gmv, orders, conversion, visitors, payment_success_rate) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        insert_rows,
+    )
+    print(f"daily_kpi (이커머스): {len(insert_rows)}건 삽입")
+
+
 def main():
     random.seed(RANDOM_SEED)  # 재현성 보장: 매번 같은 데이터 생성
 
-    # 기존 DB 파일 있으면 삭제 후 재생성
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ── 게임 DB ─────────────────────────────────────────────────
     if DB_PATH.exists():
         DB_PATH.unlink()
-        print(f"기존 DB 삭제: {DB_PATH}")
+        print(f"기존 게임 DB 삭제: {DB_PATH}")
 
     conn = duckdb.connect(str(DB_PATH))
-
     try:
         create_tables(conn)
         seed_users(conn)
@@ -723,7 +1040,25 @@ def main():
         seed_payment_errors(conn)
         seed_payment_attempts(conn)
         seed_daily_kpi(conn)
-        print(f"\nDB 생성 완료: {DB_PATH}")
+        print(f"\n게임 DB 생성 완료: {DB_PATH}")
+    finally:
+        conn.close()
+
+    # ── 이커머스 DB (빈 스키마) ──────────────────────────────────
+    if ECOMMERCE_DB_PATH.exists():
+        ECOMMERCE_DB_PATH.unlink()
+        print(f"기존 이커머스 DB 삭제: {ECOMMERCE_DB_PATH}")
+
+    conn = duckdb.connect(str(ECOMMERCE_DB_PATH))
+    try:
+        create_ecommerce_tables(conn)
+        seed_ecommerce_customers(conn)
+        seed_ecommerce_products(conn)
+        seed_ecommerce_orders(conn)
+        seed_ecommerce_inventory_changes(conn)
+        seed_ecommerce_category_daily_revenue(conn)
+        seed_ecommerce_daily_kpi(conn)
+        print(f"\n이커머스 DB 생성 완료: {ECOMMERCE_DB_PATH}")
     finally:
         conn.close()
 

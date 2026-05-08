@@ -49,7 +49,7 @@ from datapilot.pipeline import (
     PipelineStep,
     UnanalyzedAnomaly,
 )
-from datapilot.repository.port import GameDataRepository
+from datapilot.repository.port import DataRepository
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -155,13 +155,13 @@ def _make_action_plan(anomaly: str = "revenue") -> ActionPlan:
 
 
 def _make_mock_repo(anomaly_report: AnomalyReport | None = None) -> MagicMock:
-    """GameDataRepository 인터페이스 Mock 생성.
+    """DataRepository 인터페이스 Mock 생성.
 
-    Java 비유: Mockito.mock(GameDataRepository.class)
+    Java 비유: Mockito.mock(DataRepository.class)
     """
-    mock_repo = MagicMock(spec=GameDataRepository)
+    mock_repo = MagicMock(spec=DataRepository)
     mock_repo.get_daily_kpi.return_value = {
-        "game_id": "pizza_ready",
+        "entity_id": "pizza_ready",
         "period": {"from": "2025-03-25", "to": "2025-04-01"},
         "daily": [{"date": "2025-03-25", "revenue": 350000}],
     }
@@ -196,22 +196,22 @@ def _make_orchestrator_with_mocks(
     # 키워드 인자 (metrics=...) 도 받도록 **kwargs 처리: pipeline 이 metrics 를
     # 모든 에이전트에 전달하기 시작했지만 mock 자체는 metrics 를 사용하지 않는다.
     if segmentation_results is not None:
-        def _seg_side_effect(game_id, anomaly, period, repo, **_):
+        def _seg_side_effect(entity_id, anomaly, period, repo, **_):
             return segmentation_results[anomaly.metric]
         orchestrator._segmenter.analyze = Mock(side_effect=_seg_side_effect)
     else:
         orchestrator._segmenter.analyze = Mock(
-            side_effect=lambda game_id, anomaly, period, repo, **_: _make_segmentation_report(anomaly.metric)
+            side_effect=lambda entity_id, anomaly, period, repo, **_: _make_segmentation_report(anomaly.metric)
         )
 
     # ③ Hypothesis Generator — metric별 반환값 지원
     if hypothesis_results is not None:
-        def _hyp_side_effect(game_id, anomaly, segmentation, repo, **_):
+        def _hyp_side_effect(entity_id, anomaly, segmentation, repo, **_):
             return hypothesis_results[anomaly.metric]
         orchestrator._hypothesis_gen.generate = Mock(side_effect=_hyp_side_effect)
     else:
         orchestrator._hypothesis_gen.generate = Mock(
-            side_effect=lambda game_id, anomaly, segmentation, repo, **_: _make_hypothesis_list(anomaly.metric)
+            side_effect=lambda entity_id, anomaly, segmentation, repo, **_: _make_hypothesis_list(anomaly.metric)
         )
 
     # ④ Data Validator
@@ -374,13 +374,13 @@ class TestPipelineReportModel:
     """PipelineReport — 파이프라인 전체 출력 모델."""
 
     def test_creates_with_required_fields_only(self):
-        """game_id, period_from, period_to만으로 생성 — 나머지 기본값."""
+        """entity_id, period_from, period_to만으로 생성 — 나머지 기본값."""
         report = PipelineReport(
-            game_id="pizza_ready",
+            entity_id="pizza_ready",
             period_from="2025-03-25",
             period_to="2025-04-01",
         )
-        assert report.game_id == "pizza_ready"
+        assert report.entity_id == "pizza_ready"
         assert report.analyzed == []
         assert report.unanalyzed == []
         assert report.normal_metrics == []
@@ -388,21 +388,21 @@ class TestPipelineReportModel:
     def test_analyzed_defaults_to_empty_list(self):
         """analyzed 기본값은 빈 리스트."""
         report = PipelineReport(
-            game_id="g1", period_from="2025-01-01", period_to="2025-01-07"
+            entity_id="g1", period_from="2025-01-01", period_to="2025-01-07"
         )
         assert report.analyzed == []
 
     def test_unanalyzed_defaults_to_empty_list(self):
         """unanalyzed 기본값은 빈 리스트."""
         report = PipelineReport(
-            game_id="g1", period_from="2025-01-01", period_to="2025-01-07"
+            entity_id="g1", period_from="2025-01-01", period_to="2025-01-07"
         )
         assert report.unanalyzed == []
 
     def test_normal_metrics_defaults_to_empty_list(self):
         """normal_metrics 기본값은 빈 리스트."""
         report = PipelineReport(
-            game_id="g1", period_from="2025-01-01", period_to="2025-01-07"
+            entity_id="g1", period_from="2025-01-01", period_to="2025-01-07"
         )
         assert report.normal_metrics == []
 
@@ -419,7 +419,7 @@ class TestPipelineReportModel:
         ua = UnanalyzedAnomaly(anomaly=_make_anomaly_item(metric="mau"))
 
         report = PipelineReport(
-            game_id="pizza_ready",
+            entity_id="pizza_ready",
             period_from="2025-03-25",
             period_to="2025-04-01",
             analyzed=[analysis],
@@ -431,15 +431,15 @@ class TestPipelineReportModel:
         assert len(report.unanalyzed) == 1
         assert "dau" in report.normal_metrics
 
-    def test_raises_validation_error_when_game_id_missing(self):
-        """game_id 누락 → ValidationError."""
+    def test_raises_validation_error_when_entity_id_missing(self):
+        """entity_id 누락 → ValidationError."""
         with pytest.raises(ValidationError):
             PipelineReport(period_from="2025-01-01", period_to="2025-01-07")
 
     def test_raises_validation_error_when_period_from_missing(self):
         """period_from 누락 → ValidationError."""
         with pytest.raises(ValidationError):
-            PipelineReport(game_id="g1", period_to="2025-01-07")
+            PipelineReport(entity_id="g1", period_to="2025-01-07")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -904,8 +904,8 @@ class TestPipelineSchemaFetchedOnce:
         orchestrator.run(_GAME_ID, _DEFAULT_PERIOD)
         mock_repo.get_available_schema.assert_not_called()
 
-    def test_schema_fetch_called_with_game_id(self):
-        """get_available_schema가 올바른 game_id로 호출된다."""
+    def test_schema_fetch_called_with_entity_id(self):
+        """get_available_schema가 올바른 entity_id로 호출된다."""
         anomaly_report = AnomalyReport(
             anomalies=[_make_anomaly_item(metric="revenue")], normal=[],
         )
@@ -922,7 +922,7 @@ class TestPipelineSchemaFetchedOnce:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 10. PipelineReport 필드 — game_id, period 일치 검증
+# 10. PipelineReport 필드 — entity_id, period 일치 검증
 # ════════════════════════════════════════════════════════════════════
 
 
@@ -940,8 +940,8 @@ class TestPipelineReportFields:
         orchestrator, _ = _make_orchestrator_with_mocks(anomaly_report)
         return orchestrator.run("pizza_ready", (date(2025, 3, 25), date(2025, 4, 1)))
 
-    def test_game_id_matches_input(self, result):
-        assert result.game_id == "pizza_ready"
+    def test_entity_id_matches_input(self, result):
+        assert result.entity_id == "pizza_ready"
 
     def test_period_from_matches_start_date(self, result):
         """period_from은 ISO format 문자열 "2025-03-25"이어야 한다."""
@@ -958,12 +958,12 @@ class TestPipelineReportFields:
         date_cls.fromisoformat(result.period_from)
         date_cls.fromisoformat(result.period_to)
 
-    def test_different_game_id_propagates_to_report(self):
-        """다른 game_id로 실행해도 report에 정확히 반영된다."""
+    def test_different_entity_id_propagates_to_report(self):
+        """다른 entity_id로 실행해도 report에 정확히 반영된다."""
         anomaly_report = AnomalyReport(anomalies=[], normal=[])
         orchestrator, _ = _make_orchestrator_with_mocks(anomaly_report)
         result = orchestrator.run("another_game", _DEFAULT_PERIOD)
-        assert result.game_id == "another_game"
+        assert result.entity_id == "another_game"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1251,7 +1251,7 @@ class TestPipelineAnomalyOrder:
     def test_order_defaults_to_empty_in_model(self):
         """PipelineReport 직접 생성 시 기본값은 빈 리스트."""
         report = PipelineReport(
-            game_id="g1", period_from="2025-01-01", period_to="2025-01-07",
+            entity_id="g1", period_from="2025-01-01", period_to="2025-01-07",
         )
         assert report.anomaly_order == []
 

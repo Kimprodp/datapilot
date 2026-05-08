@@ -13,7 +13,9 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from datapilot.agents import AgentBundle
 from datapilot.demo import run_demo
+from datapilot.domain import DOMAINS
 from datapilot.pipeline import (
     AnomalyAnalysis,
     PipelineOrchestrator,
@@ -21,7 +23,7 @@ from datapilot.pipeline import (
     PipelineStep,
     UnanalyzedAnomaly,
 )
-from datapilot.repository.duckdb_adapter import DuckDBAdapter
+from datapilot.repository import make_repository
 
 
 # ------------------------------------------------------------------
@@ -34,13 +36,31 @@ st.set_page_config(page_title="DataPilot", page_icon="📊", layout="centered")
 # 상수
 # ------------------------------------------------------------------
 
-_APP_SUBTITLE = "운영 지표에서 병목을 찾고, 원인을 분석하고, 액션을 제안합니다."
+_APP_SUBTITLE = "운영 지표에서 병목을 찾고, 원인을 분석하고, 액션을 제안하는 데이터 코파일럿입니다."
 
 _PERIOD_OPTIONS = {
     "최근 7일": 7,
     "최근 14일": 14,
     "최근 30일": 30,
 }
+
+#: 산업 selectbox 변경 시 비울 session_state 키 — 이전 도메인 분석 결과 잔존 방지.
+#: 새 분석 결과 키 추가 시 본 set 도 갱신해야 함 (회귀 차단은 test_session_state_reset.py).
+RESET_ON_DOMAIN_CHANGE: frozenset[str] = frozenset({
+    "report",
+    "selected_anomaly_idx",
+})
+
+
+def _on_domain_change() -> None:
+    """산업 selectbox 변경 콜백.
+
+    이전 도메인의 분석 결과 / 선택 상태를 비워 화면이 새 도메인 기준으로 자연
+    렌더되도록 한다. ``make_repository`` 의 ``@st.cache_resource`` 도 도메인이
+    바뀌면 별도 인스턴스가 생성되므로 별도 invalidate 불필요.
+    """
+    for k in RESET_ON_DOMAIN_CHANGE:
+        st.session_state.pop(k, None)
 
 _SEVERITY_COLORS = {
     "HIGH": ("#fce4e4", "#c0392b"),
@@ -71,7 +91,17 @@ _AGENT_NAMES = {
 
 _AGENT_ORDER = ["bottleneck", "segmentation", "hypothesis", "validation", "root_cause", "action"]
 
-_SUPPORTED_DISPLAY = "매출 · DAU · 결제 성공률 · 리텐션"
+def _supported_display(domain: str) -> str:
+    """현재 도메인의 segmentable KPI 한글명 ' · ' 결합.
+
+    ``DOMAINS[domain].supported_segment_metrics`` 의 각 KPI 코드를
+    ``ui_labels.kpi_korean`` 으로 변환. 미지원 카드 안내 문구에 사용.
+    """
+    cfg = DOMAINS[domain]
+    return " · ".join(
+        cfg.ui_labels.kpi_korean.get(m, m)
+        for m in sorted(cfg.supported_segment_metrics)
+    )
 
 _VALIDATION_SORT = {"supported": 0, "rejected": 1, "unverified": 2}
 _PRIORITY_SORT = {"urgent": 0, "short_term": 1, "mid_term": 2}
@@ -110,10 +140,21 @@ def _severity_badge(severity: str) -> str:
 
 def _app_header() -> None:
     st.title("DataPilot")
+    base_style = (
+        "color:#888;font-size:16px;line-height:1.6;letter-spacing:-0.01em;"
+    )
+    note_style = (
+        "color:#aaa;font-size:14px;line-height:1.6;letter-spacing:-0.01em;"
+    )
     st.markdown(
-        f"<div style='color:#888;font-size:14px;margin-top:-10px;'>{_APP_SUBTITLE}</div>"
-        "<div style='color:#888;font-size:14px;margin-top:2px;'>"
-        "현재 데모 버전으로, 가상의 게임 데이터를 기반으로 동작합니다. 분석에 약 10분이 소요됩니다.</div>"
+        f"<div style='{base_style}margin-top:-10px;'>{_APP_SUBTITLE}</div>"
+        f"<div style='{base_style}margin-top:4px;'>"
+        f"실제 운영 환경에서는 연동된 DB의 선택 기간 데이터를 분석해 리포트를 제공합니다.</div>"
+        f"<div style='{base_style}margin-top:4px;'>"
+        f"데모 버전은 가상 데이터로 구성된 DB를 사용해 동작하며, "
+        f"현재 게임·이커머스 두 업종을 체험할 수 있습니다.</div>"
+        f"<div style='{note_style}margin-top:10px;'>"
+        f"분석에는 약 3~6분이 소요됩니다.</div>"
         "<hr style='margin:12px 0 18px 0;border:none;border-top:1px solid #eee;'>",
         unsafe_allow_html=True,
     )
@@ -187,12 +228,23 @@ def _render_anomaly_summary(anomaly_item) -> None:
 def page_start() -> None:
     _app_header()
 
-    # 게임 선택
+    # 업종 (도메인) 선택
     st.markdown(
-        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>게임 선택</div>",
+        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>업종 선택</div>",
         unsafe_allow_html=True,
     )
-    game = st.selectbox("게임 선택", ["Pizza Ready"], index=0, label_visibility="collapsed")
+    domain_keys = list(DOMAINS.keys())  # ["game", "ecommerce"]
+    if "domain" not in st.session_state:
+        st.session_state.domain = "game"
+    st.selectbox(
+        "업종 선택",
+        domain_keys,
+        format_func=lambda d: DOMAINS[d].ui_labels.industry_name,
+        key="domain",
+        on_change=_on_domain_change,
+        label_visibility="collapsed",
+    )
+    domain = st.session_state.domain
 
     # 화면1 공통 CSS
     st.markdown("""<style>
@@ -241,8 +293,9 @@ def page_start() -> None:
         days = _PERIOD_OPTIONS[period_label]
         today = date(2026, 3, 31)  # Mock 데이터 기준일
         p = (today - timedelta(days=days - 1), today)
-        st.session_state.game_id = "pizza_ready"
-        st.session_state.game_name = game
+        cfg = DOMAINS[domain]
+        st.session_state.entity_id = cfg.ui_labels.entity_default_id
+        st.session_state.industry_name = cfg.ui_labels.industry_name
         st.session_state.period = p
         st.session_state.period_label = period_label
         st.session_state.is_demo = is_demo
@@ -280,18 +333,15 @@ _STEP_LABELS = {
     "root_cause": "원인 추론",
     "action": "액션 제안",
 }
-_METRIC_DISPLAY: dict[str, str] = {
-    "revenue": "인앱결제 매출",
-    "dau": "DAU",
-    "payment_success_rate": "결제 성공률",
-    "d1_retention": "D1 리텐션",
-    "d7_retention": "D7 리텐션",
-    "arppu": "유저당 평균 결제액",
-    "new_installs": "신규 설치",
-    "sessions": "세션 수",
-    "avg_session_sec": "평균 세션 길이",
-    "mau": "MAU",
-}
+def _metric_display(metric: str, domain: str | None = None) -> str:
+    """카드 라벨용 metric 표시명 — "{한글명}({영문코드})" 형식.
+
+    도메인의 ``ui_labels.kpi_korean`` 에서 한글명을 찾고, 없으면 metric 코드를
+    그대로 노출 (legacy fallback).
+    """
+    domain = domain or st.session_state.get("domain", "game")
+    korean = DOMAINS[domain].ui_labels.kpi_korean.get(metric)
+    return f"{korean}({metric})" if korean else metric
 
 
 def _step_box_html(text: str, status: str) -> str:
@@ -349,8 +399,13 @@ def page_running() -> None:
         date_range = f"{period[0].strftime('%Y.%m.%d')} ~ {period[1].strftime('%Y.%m.%d')}"
     else:
         date_range = st.session_state.period_label
-    st.subheader(
-        f"{st.session_state.game_name} ({date_range}) 분석 중..."
+    st.markdown(
+        f"<div style='font-size:18px;font-weight:600;color:#333;"
+        f"margin-top:8px;margin-bottom:16px;'>"
+        f"{st.session_state.industry_name} 업종의 ({date_range}) "
+        f"데모 데이터를 분석 중입니다..."
+        f"</div>",
+        unsafe_allow_html=True,
     )
 
     detection_ph = st.empty()
@@ -400,13 +455,11 @@ def page_running() -> None:
             cards_ph.empty()
             return
         html = (
-            "<div style='font-size:13px;font-weight:600;color:#888;"
-            "margin-top:8px;margin-bottom:4px;'>이상 지표별 상세 분석</div>"
-            "<div style='font-size:11px;color:#aaa;margin-bottom:12px;'>"
-            "이상 지표 수에 따라 약 5~10분 소요될 수 있습니다.</div>"
+            "<div style='font-size:18px;font-weight:700;color:#333;"
+            "margin-top:16px;margin-bottom:12px;'>이상 지표별 상세 분석</div>"
         )
         for metric in card_order:
-            base_label = _METRIC_DISPLAY.get(metric, metric)
+            base_label = _metric_display(metric)
             direction = metric_direction.get(metric, "")
             label = f"{base_label} {direction}".strip()
 
@@ -504,11 +557,13 @@ def page_running() -> None:
     render_detection()
 
     def _run_pipeline() -> PipelineReport:
+        domain = st.session_state.domain
         if st.session_state.get("is_demo", False):
-            return run_demo(on_step=on_step)
-        with DuckDBAdapter() as repo:
-            return PipelineOrchestrator(repo).run(
-                st.session_state.game_id,
+            return run_demo(domain, on_step=on_step)
+        with make_repository(domain) as repo:
+            agents = AgentBundle.create(domain, repo=repo)
+            return PipelineOrchestrator(repo, agents=agents).run(
+                st.session_state.entity_id,
                 st.session_state.period,
                 on_step=on_step,
             )
@@ -667,7 +722,7 @@ def page_report() -> None:
     else:
         date_range = st.session_state.period_label
     st.subheader(
-        f"분석 완료 — {st.session_state.game_name} ({date_range})"
+        f"분석 완료 — {st.session_state.industry_name} 업종 ({date_range})"
     )
 
     if not report.analyzed and not report.unanalyzed:
@@ -916,7 +971,7 @@ def _render_unanalyzed(ua: UnanalyzedAnomaly) -> None:
             f"border-radius:6px;display:inline-block;'>"
             f"<div style='font-size:11px;color:#888;'>현재 세부 분석 가능 지표</div>"
             f"<div style='font-size:12px;color:#555;margin-top:2px;font-weight:500;'>"
-            f"{_SUPPORTED_DISPLAY}</div></div></div>",
+            f"{_supported_display(st.session_state.get('domain', 'game'))}</div></div></div>",
             unsafe_allow_html=True,
         )
 

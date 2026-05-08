@@ -12,15 +12,18 @@ from __future__ import annotations
 import duckdb
 import pytest
 
-from datapilot.repository.duckdb_adapter import DEFAULT_DB_PATH, DuckDBAdapter
+from datapilot.domain import DOMAINS
+from datapilot.repository.duckdb_adapter import _PROJECT_ROOT, DuckDBAdapter
+
+GAME_DB_PATH = _PROJECT_ROOT / DOMAINS["game"].db_path
 
 
 @pytest.fixture(scope="session")
 def mock_db_conn():
-    """실제 Mock DB를 read-only로 연 DuckDB 연결. 세션 내 한 번만 열린다."""
-    if not DEFAULT_DB_PATH.exists():
-        pytest.skip(f"Mock DB 파일 없음: {DEFAULT_DB_PATH}. seed_mock_data.py 먼저 실행 필요.")
-    conn = duckdb.connect(str(DEFAULT_DB_PATH), read_only=True)
+    """실제 게임 Mock DB를 read-only로 연 DuckDB 연결. 세션 내 한 번만 열린다."""
+    if not GAME_DB_PATH.exists():
+        pytest.skip(f"Mock DB 파일 없음: {GAME_DB_PATH}. seed_mock_data.py 먼저 실행 필요.")
+    conn = duckdb.connect(str(GAME_DB_PATH), read_only=True)
     yield conn
     conn.close()
 

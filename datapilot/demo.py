@@ -656,6 +656,479 @@ def _demo_arppu_unanalyzed() -> UnanalyzedAnomaly:
     )
 
 
+# ==================================================================
+# 이커머스 도메인 — 시나리오: kitchen 카테고리 인기 상품(p_kitchen_01) 품절
+# ==================================================================
+#
+# 라이브 분석(2026-05-09 측정) 결과를 Pydantic 객체 패턴으로 고정.
+# 본 묶음의 검증 통과 결과 — 두 segmentable KPI(orders, gmv)가 모두
+# "재고 부족" 으로 정답 도출, ⑤ RCR 환각 방어 정상 작동.
+
+_LABEL_ORDERS = "주문 수"
+_LABEL_GMV = "총 거래액"
+_LABEL_CONVERSION = "전환율"
+
+
+def _demo_orders() -> AnomalyAnalysis:
+    anomaly = AnomalyItem(
+        metric="orders",
+        metric_label="주문 수 (orders)",
+        change=-0.126,
+        change_display="-12.6%",
+        comparison_detail=(
+            "직전 22일 평균 500 → 최근 8일 평균 437"
+        ),
+        severity="HIGH",
+        reasoning=(
+            "3/24(화)부터 주문 수가 500건에서 437건으로 수직 하락하여 8일 연속 "
+            "동일 수준 유지 중. 정상 변동 범위(±5%)를 크게 초과하는 12.6% 급감이며, "
+            "단일 이벤트성 변동이 아닌 구조적 하락 고착 패턴. 같은 기간 방문자(visitors)는 "
+            "14,500~15,100명대로 정상 유지되어 트래픽 감소가 아닌 전환 단계의 문제로 추정됨."
+        ),
+    )
+    segmentation = SegmentationReport(
+        anomaly=_LABEL_ORDERS,
+        concentration=SegmentConcentration(
+            dimension="country", focus="japan", change=-13.1,
+        ),
+        breakdown={
+            "country": {
+                "germany": -5.5, "japan": -13.1,
+                "korea": -9.5, "usa": -10.6,
+            },
+            "customer_type": {
+                "new": -9.8, "returning": -12.8, "vip": -9.2,
+            },
+            "device": {
+                "desktop": -13.0, "mobile": -10.8, "tablet": 3.2,
+            },
+        },
+        summary="주문 수 감소가 특정 세그먼트에 집중되지 않음 (전반적 하락)",
+        spread_type="spread",
+    )
+    hypotheses = HypothesisList(
+        anomaly=_LABEL_ORDERS,
+        hypotheses=[
+            Hypothesis(
+                hypothesis="인기 상품 품절·단종으로 구매 가능 상품 감소",
+                reasoning=(
+                    "주문 수 단일 시점 수직 하락 + 방문자 정상 유지 → "
+                    "유입은 있으나 살 게 없는 상황 의심"
+                ),
+                required_tables=[
+                    "inventory_changes", "products", "orders",
+                    "category_daily_revenue",
+                ],
+            ),
+            Hypothesis(
+                hypothesis="결제 성공률 하락으로 인한 주문 전환 실패 증가",
+                reasoning=(
+                    "전환율 하락(3.37% → 2.96%) 발생 → 결제 단계 장애 가능성 점검"
+                ),
+                required_tables=["daily_kpi"],
+            ),
+            Hypothesis(
+                hypothesis="프로모션/할인 캠페인 종료로 구매 유인 소멸",
+                reasoning=(
+                    "전사 주문 수 동시 하락 시 가격 매력도 소멸이 일반적 원인"
+                ),
+                required_tables=["orders", "category_daily_revenue"],
+            ),
+            Hypothesis(
+                hypothesis="체크아웃 UI/UX 변경(빌드 배포)으로 전환 퍼널 이탈 증가",
+                reasoning=(
+                    "전환율 하락 + 트래픽 정상 → 결제·체크아웃 흐름 변경 의심"
+                ),
+                required_tables=["daily_kpi", "orders"],
+            ),
+        ],
+    )
+    validation_results = [
+        ValidationResult(
+            hypothesis="인기 상품 품절·단종으로 구매 가능 상품 감소",
+            status="supported",
+            evidence=(
+                "3/24 시점에 kitchen 카테고리 핵심 상품(p_kitchen_01)이 "
+                "out_of_stock으로 전환(보충 일정 미정)되었고, 동시에 kitchen "
+                "주문이 125건 → 62건(-50.4%)으로 급감했다. beauty·electronics·"
+                "fashion 3개 카테고리는 주문 수 변동이 전혀 없어 품절이 직접 "
+                "원인임이 명확하다. 전체 주문 감소분(-63건)이 kitchen 감소분"
+                "(-63건)과 정확히 일치한다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="결제 성공률 하락으로 인한 주문 전환 실패 증가",
+            status="rejected",
+            evidence=(
+                "결제 성공률은 3/24 이후 오히려 소폭 상승(96.63% → 96.94%)했으며, "
+                "전환율 하락(3.37% → 2.96%)과 방문자 수 정상(14,848 → 14,803)은 "
+                "결제 게이트웨이 장애와 무관함을 보여준다. 결제 성공률이 상승한 "
+                "사실이 해당 가설을 정면으로 반박한다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="프로모션/할인 캠페인 종료로 구매 유인 소멸",
+            status="rejected",
+            evidence=(
+                "프로모션 종료라면 전 카테고리 전환율이 동반 하락해야 하나, "
+                "beauty·electronics·fashion은 3/24 이후에도 주문 수가 125건으로 "
+                "완전히 동일하게 유지됐다. 하락이 kitchen 단일 카테고리에만 "
+                "국한되어 있어 가격 매력도 소멸 가설과 부합하지 않는다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="체크아웃 UI/UX 변경(빌드 배포)으로 전환 퍼널 이탈 증가",
+            status="rejected",
+            evidence=(
+                "UI/UX 배포 장애라면 전 카테고리 전환율이 동시에 하락해야 하나, "
+                "beauty·electronics·fashion 3개 카테고리는 3/24 전후 주문 수가 "
+                "125건으로 동일하며 영향이 전혀 없다. 하락이 kitchen 카테고리에만 "
+                "집중된 구조는 UI 변경이 아닌 상품 가용성 문제를 가리킨다."
+            ),
+        ),
+    ]
+    root_cause = RootCauseReport(
+        anomaly=_LABEL_ORDERS,
+        root_cause=RootCause(
+            chain=[
+                CausalStep(
+                    step="키친 카테고리 핵심 상품 품절 전환",
+                    evidence=(
+                        "3/24 00:00 기준 p_kitchen_01(Kitchen Item 1)이 "
+                        "'재고 소진(보충 일정 미정)' 사유로 out_of_stock 상태로 "
+                        "전환되었고, 같은 날 inventory_changes에 기록된 품절 "
+                        "상품은 해당 1건뿐이다."
+                    ),
+                ),
+                CausalStep(
+                    step=(
+                        "품절로 인해 키친 카테고리 전환율이 하락하여 "
+                        "키친 주문 수가 절반으로 급감"
+                    ),
+                    evidence=(
+                        "kitchen 카테고리 일평균 주문 수가 3/24 이전 125건에서 "
+                        "이후 62건으로 -50.4% 급감한 반면, "
+                        "beauty·electronics·fashion 3개 카테고리는 동 기간 125건"
+                        "으로 전혀 변동이 없다."
+                    ),
+                ),
+                CausalStep(
+                    step=(
+                        "키친 주문 감소분이 전체 주문 감소분과 완전히 일치하여 "
+                        "전사 주문 수 -12.6% 하락 고착"
+                    ),
+                    evidence=(
+                        "전체 일평균 주문 수가 500건 → 437건(-63건)으로 "
+                        "감소했으며, 이는 kitchen 감소분(-63건)과 정확히 일치하고, "
+                        "방문자 수는 14,848명 → 14,803명으로 정상 유지되어 "
+                        "트래픽 이슈가 아님이 확인된다."
+                    ),
+                ),
+            ],
+            summary=(
+                "3/24 kitchen 카테고리 핵심 상품(Kitchen Item 1) 품절로 인해 "
+                "kitchen 주문이 50.4% 급감했고, 이 감소분이 전체 주문 수 -12.6% "
+                "하락과 정확히 일치한다."
+            ),
+        ),
+    )
+    action_plan = ActionPlan(
+        anomaly=_LABEL_ORDERS,
+        actions=[
+            Action(
+                priority="urgent",
+                title="p_kitchen_01 긴급 재고 확보 및 판매 재개",
+                effect="kitchen 카테고리 주문 수 회복으로 전사 주문 수 -12.6% 하락 즉시 해소 기대",
+                effort="MD/소싱 담당자 1명, 공급사 긴급 협의 1~2일",
+            ),
+            Action(
+                priority="urgent",
+                title="p_kitchen_01 품절 기간 대체 상품 전면 노출",
+                effect="품절 공백 기간 동안 kitchen 카테고리 전환율 하락 최소화 및 주문 이탈 방어",
+                effort="MD 1명 + 프론트 운영자 1명, 반나절 (상품 선정 및 배너/진열 변경)",
+            ),
+            Action(
+                priority="short_term",
+                title="kitchen 카테고리 핵심 상품 재고 임계치 알림 설정",
+                effect="핵심 상품 품절 전환 전 사전 감지로 동일 유형의 주문 급감 재발 방지",
+                effort="개발자 1명, 3일 (재고 임계치 알림 로직 구현 및 MD 알림 채널 연동)",
+            ),
+            Action(
+                priority="mid_term",
+                title="카테고리별 핵심 상품 안전 재고 기준 수립 및 정기 점검 프로세스 도입",
+                effect="단일 상품 품절이 카테고리·전사 주문에 미치는 리스크를 구조적으로 차단",
+                effort="MD팀 + 운영팀 협업, 2주 (기준 정의 → 점검 주기 및 책임자 지정 → 문서화)",
+            ),
+        ],
+    )
+    return AnomalyAnalysis(
+        anomaly=anomaly,
+        segmentation=segmentation,
+        hypotheses=hypotheses,
+        validation_results=validation_results,
+        root_cause=root_cause,
+        action_plan=action_plan,
+    )
+
+
+def _demo_gmv_ecommerce() -> AnomalyAnalysis:
+    anomaly = AnomalyItem(
+        metric="gmv",
+        metric_label="총 거래액 (gmv)",
+        change=-0.127,
+        change_display="-12.7%",
+        comparison_detail=(
+            "직전 22일 평균 2,001,479 → 최근 8일 평균 1,749,647"
+        ),
+        severity="MEDIUM",
+        reasoning=(
+            "3/24부터 GMV가 약 200만에서 175만 수준으로 하락하여 8일 연속 유지. "
+            "orders 급감(-12.6%)과 동일 시점·동일 폭으로 하락하며 주문 수 감소의 "
+            "직접적인 후행 결과. 객단가(GMV/orders)는 3,978→4,006으로 오히려 "
+            "소폭 상승, 즉 단가 문제가 아닌 주문 건수 감소가 원인."
+        ),
+    )
+    segmentation = SegmentationReport(
+        anomaly=_LABEL_GMV,
+        concentration=SegmentConcentration(
+            dimension="device", focus="desktop", change=-16.6,
+        ),
+        breakdown={
+            "country": {
+                "germany": -9.5, "japan": -13.6,
+                "korea": -11.9, "usa": -13.8,
+            },
+            "customer_type": {
+                "new": -9.7, "returning": -10.9, "vip": -12.5,
+            },
+            "device": {
+                "desktop": -16.6, "mobile": -6.7, "tablet": 1.8,
+            },
+        },
+        summary="총 거래액 감소가 특정 세그먼트에 집중되지 않음 (전반적 하락)",
+        spread_type="spread",
+    )
+    hypotheses = HypothesisList(
+        anomaly=_LABEL_GMV,
+        hypotheses=[
+            Hypothesis(
+                hypothesis="인기 카테고리 또는 베스트셀러 상품 품절/단종으로 구매 가능 상품 축소",
+                reasoning=(
+                    "GMV -12.7% 와 주문수 -12.6% 동조 하락 + 객단가 정상 → "
+                    "주문 건수 감소가 매출 하락 견인. 단일 상품/카테고리 이슈 의심"
+                ),
+                required_tables=[
+                    "inventory_changes", "products", "orders",
+                    "category_daily_revenue",
+                ],
+            ),
+            Hypothesis(
+                hypothesis="주요 프로모션/할인 캠페인 종료로 인한 전체 주문 수 급감",
+                reasoning=(
+                    "전체 GMV 동시 하락이라면 가격 매력도 소멸이 일반적 원인"
+                ),
+                required_tables=["orders", "category_daily_revenue"],
+            ),
+            Hypothesis(
+                hypothesis="외부 트래픽(마케팅 채널/광고) 유입 감소로 방문자 수 자체가 줄어 주문 감소",
+                reasoning=(
+                    "GMV 하락 시 매출 깔때기 가장 위 단계인 유입부터 점검"
+                ),
+                required_tables=["daily_kpi"],
+            ),
+            Hypothesis(
+                hypothesis="결제 성공률 하락 또는 결제 시스템 부분 장애로 완결 주문 감소",
+                reasoning=(
+                    "GMV 직접 영향 가능한 결제 단계의 장애 가능성 점검"
+                ),
+                required_tables=["daily_kpi"],
+            ),
+        ],
+    )
+    validation_results = [
+        ValidationResult(
+            hypothesis="인기 카테고리 또는 베스트셀러 상품 품절/단종으로 구매 가능 상품 축소",
+            status="supported",
+            evidence=(
+                "3/24 당일 p_kitchen_01(Kitchen Item 1)이 '재고 소진(보충 일정 "
+                "미정)'으로 out_of_stock 전환되었다. kitchen 카테고리 주문이 "
+                "정확히 3/24부터 125건 → 62건으로 -50.4% 급감하였으며, 전체 주문 "
+                "감소(-63건/일)와 kitchen 카테고리 감소(-63건/일)가 완전히 1:1로 "
+                "일치한다. 나머지 3개 카테고리(beauty·electronics·fashion)는 "
+                "동일 기간 변화가 없어 품절이 단일 원인임을 강하게 지지한다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="주요 프로모션/할인 캠페인 종료로 인한 전체 주문 수 급감",
+            status="rejected",
+            evidence=(
+                "beauty·electronics·fashion 3개 카테고리는 3/24 이후에도 일 125건"
+                "으로 전혀 감소하지 않았다. 주문 감소는 kitchen 카테고리 단독"
+                "(-50%)에서만 발생했으며, 프로모션 종료 시 예상되는 전 세그먼트·"
+                "전 카테고리 동시 하락 패턴과 일치하지 않는다. 객단가 역시 "
+                "3,998원 → 4,004원으로 거의 변동이 없어 할인 종료에 따른 단가 "
+                "상승 효과도 확인되지 않는다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="외부 트래픽(마케팅 채널/광고) 유입 감소로 방문자 수 자체가 줄어 주문 감소",
+            status="rejected",
+            evidence=(
+                "3/24 이후 일평균 방문자 수는 14,803명으로, 이전(14,848명) 대비 "
+                "-0.3%에 불과하여 사실상 변동이 없다. 트래픽 유입 감소 가설이 "
+                "성립하려면 방문자 수의 유의미한 하락이 선행되어야 하나, 데이터상 "
+                "이를 전혀 확인할 수 없다. 전환율 하락(3.37% → 2.96%)은 트래픽 "
+                "감소가 아닌 구매 가능 상품 축소에 기인한 것으로 판단된다."
+            ),
+        ),
+        ValidationResult(
+            hypothesis="결제 성공률 하락 또는 결제 시스템 부분 장애로 완결 주문 감소",
+            status="rejected",
+            evidence=(
+                "3/24 이후 결제 성공률은 96.94%로, 이전(96.63%) 대비 오히려 "
+                "+0.31%p 소폭 상승하였다. 결제 시스템 장애의 증거가 전혀 없으며, "
+                "전환율 하락(3.37% → 2.96%)은 결제 실패가 아닌 kitchen 카테고리 "
+                "핵심 상품 품절로 인한 구매 가능 상품 감소에 기인한다. desktop "
+                "기기의 상대적 큰 하락(-16.6%) 역시 결제 모듈 장애가 아닌 상품 "
+                "부재로 설명된다."
+            ),
+        ),
+    ]
+    root_cause = RootCauseReport(
+        anomaly=_LABEL_GMV,
+        root_cause=RootCause(
+            chain=[
+                CausalStep(
+                    step="Kitchen Item 1 재고 소진으로 품절 전환",
+                    evidence=(
+                        "3/24 p_kitchen_01이 'out_of_stock(재고 소진, 보충 일정 "
+                        "미정)'으로 전환되었으며, inventory_changes 기준 해당일 "
+                        "재고 상태 변경은 이 1건이 유일하다."
+                    ),
+                ),
+                CausalStep(
+                    step="kitchen 카테고리 전환율 하락 및 주문 수 급감",
+                    evidence=(
+                        "kitchen 카테고리 일 주문 수가 3/23 125건에서 3/24 62건"
+                        "으로 -50.4% 급감하였으며, 동일 기간 "
+                        "beauty·electronics·fashion 3개 카테고리는 일 125건으로 "
+                        "변동 없었다."
+                    ),
+                ),
+                CausalStep(
+                    step="kitchen 카테고리 주문 감소가 전체 주문 감소와 완전히 1:1 대응",
+                    evidence=(
+                        "전체 일 주문 수가 500건→437건(-63건)으로 감소하였고, "
+                        "kitchen 카테고리 감소분(-63건)과 완전히 일치한다."
+                    ),
+                ),
+                CausalStep(
+                    step="전체 전환율 하락 (방문자 수는 유지)",
+                    evidence=(
+                        "3/24 이후 일평균 방문자 수는 14,803명으로 이전(14,848명) "
+                        "대비 -0.3% 수준이나, 전환율은 3.37%→2.96%로 -0.41%p "
+                        "하락하였다."
+                    ),
+                ),
+                CausalStep(
+                    step="주문 건수 감소가 총 거래액 -12.7% 하락으로 직결",
+                    evidence=(
+                        "객단가는 3,998원→4,004원으로 사실상 동일하고, 총 거래액은 "
+                        "일평균 2,001,479→1,749,647로 -12.7% 하락하여 주문 건수 "
+                        "감소(-12.6%)와 동일한 폭·시점으로 하락하였다."
+                    ),
+                ),
+            ],
+            summary=(
+                "3/24 Kitchen Item 1(p_kitchen_01)의 재고 소진(보충 일정 미정)으로 "
+                "kitchen 카테고리 주문이 -50.4% 급감하였고, 이 감소분이 전체 주문 "
+                "수 감소와 1:1로 일치하여 총 거래액이 -12.7% 하락하였다."
+            ),
+        ),
+    )
+    action_plan = ActionPlan(
+        anomaly=_LABEL_GMV,
+        actions=[
+            Action(
+                priority="urgent",
+                title="p_kitchen_01 긴급 재입고 발주",
+                effect="kitchen 카테고리 주문 수 회복으로 GMV -12.7% 하락 즉시 반전 기대",
+                effort="MD/구매 담당자 1명, 당일 공급사 긴급 발주 처리",
+            ),
+            Action(
+                priority="urgent",
+                title="p_kitchen_01 품절 페이지에 대체 상품 노출",
+                effect="품절 방문자의 이탈 방지 및 kitchen 카테고리 전환율 부분 회복",
+                effort="프론트엔드 개발자 1명 + MD 1명, 0.5일",
+            ),
+            Action(
+                priority="short_term",
+                title="kitchen 카테고리 할인/기획전으로 수요 회복",
+                effect="품절 기간 중 카테고리 내 타 상품 구매 유도로 GMV 손실 최소화",
+                effort="마케팅 담당자 1명 + MD 1명, 2~3일",
+            ),
+            Action(
+                priority="short_term",
+                title="재고 소진 임박 시 자동 알림 설정",
+                effect="주요 상품 품절 전환 전 선제 발주로 동일 사고 재발 방지",
+                effort="운영 담당자 1명, 재고 관리 시스템 임계값 설정 1일",
+            ),
+            Action(
+                priority="mid_term",
+                title="단일 상품 의존도 모니터링 대시보드 구축",
+                effect="특정 상품·카테고리 GMV 기여 집중도 상시 파악으로 리스크 조기 감지",
+                effort="데이터 분석가 1명 + 개발자 1명, 1~2주",
+            ),
+        ],
+    )
+    return AnomalyAnalysis(
+        anomaly=anomaly,
+        segmentation=segmentation,
+        hypotheses=hypotheses,
+        validation_results=validation_results,
+        root_cause=root_cause,
+        action_plan=action_plan,
+    )
+
+
+def _demo_conversion_unanalyzed() -> UnanalyzedAnomaly:
+    return UnanalyzedAnomaly(
+        anomaly=AnomalyItem(
+            metric="conversion",
+            metric_label="전환율 (conversion)",
+            change=-0.119,
+            change_display="3.4% → 3.0% (-0.4%p)",
+            comparison_detail=(
+                "직전 22일 평균 3.37% → 최근 8일 평균 2.97%"
+            ),
+            severity="MEDIUM",
+            reasoning=(
+                "3/24부터 전환율이 3.3~3.5%에서 2.9~3.0%로 0.4%p 급락하여 "
+                "8일 연속 이 수준에 고착. orders 급감과 동일 시점에 발생하며 "
+                "선행 지표인 orders 이상과 연동된 후행 확인 지표. 방문자 수는 "
+                "정상이므로 유입 문제가 아닌 장바구니·결제 흐름 상의 전환 장벽이 "
+                "발생한 것으로 추정됨."
+            ),
+        ),
+    )
+
+
+def build_demo_report_ecommerce() -> PipelineReport:
+    """이커머스 데모용 PipelineReport 를 구성한다."""
+    return PipelineReport(
+        entity_id="ecommerce_demo",
+        period_from="2026-03-02",
+        period_to="2026-03-31",
+        analyzed=[
+            _demo_orders(),
+            _demo_gmv_ecommerce(),
+        ],
+        unanalyzed=[_demo_conversion_unanalyzed()],
+        normal_metrics=["visitors", "payment_success_rate"],
+        anomaly_order=["orders", "conversion", "gmv"],
+    )
+
+
 # ------------------------------------------------------------------
 # 리포트 조립
 # ------------------------------------------------------------------
@@ -667,7 +1140,7 @@ def build_demo_report() -> PipelineReport:
     anomaly_order는 ① 병목 탐지 보고 순서를 따른다.
     """
     return PipelineReport(
-        game_id="pizza_ready",
+        entity_id="pizza_ready",
         period_from="2026-03-02",
         period_to="2026-03-31",
         analyzed=[
@@ -738,7 +1211,14 @@ def _simulate_analyze_one(
         _notify(on_step, agent, "done", done_summary, metric=metric)
 
 
+_DEMO_BUILDERS = {
+    "game": build_demo_report,
+    "ecommerce": build_demo_report_ecommerce,
+}
+
+
 def run_demo(
+    domain: str = "game",
     *,
     on_step: OnStepCallback = None,
 ) -> PipelineReport:
@@ -755,8 +1235,12 @@ def run_demo(
             validation active → done (확인 S / 기각 R / 미검증 U)
             root_cause active → done
             action active → done (액션 N개)
+
+    Args:
+        domain: 데모 대상 도메인 ("game" / "ecommerce"). 디폴트는 "game" (legacy).
     """
-    report = build_demo_report()
+    builder = _DEMO_BUILDERS.get(domain, build_demo_report)
+    report = builder()
 
     # ── ① 병목 탐지 ─────────────────────────────────────
     _notify(on_step, "bottleneck", "active")

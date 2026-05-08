@@ -35,6 +35,8 @@ from datapilot.agents.bottleneck_detector import AnomalyItem
 from datapilot.agents.data_validator import ValidationResult
 from datapilot.agents.segmentation_analyzer import SegmentationReport
 from datapilot.config import ANTHROPIC_API_KEY, MAX_TOKENS, SONNET_MODEL
+from datapilot.domain import GAME
+from datapilot.domain.base import DomainKeywords
 from datapilot.observability import NULL_METRICS
 
 # ──────────────────────────────────────────────────────────────────
@@ -139,6 +141,10 @@ _SYSTEM_BLOCKS = [
 ]
 
 USER_PROMPT_TEMPLATE = """\
+[분석 도메인]
+역할: {role_descriptor}
+핵심 지표: {primary_kpis}
+
 다음은 이상 분석 결과다.
 
 [원본 이상 지표]
@@ -178,7 +184,14 @@ class RootCauseReasoner:
         }
     """
 
-    def __init__(self, *, llm: BaseChatModel | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        llm: BaseChatModel | None = None,
+        domain_keywords: DomainKeywords | None = None,
+    ) -> None:
+        # 다음 task 의 user template placeholder 추가에서 활용 예정
+        self._domain_keywords = domain_keywords
         if llm is None:
             llm = ChatAnthropic(
                 model=SONNET_MODEL,
@@ -216,9 +229,12 @@ class RootCauseReasoner:
         """
         metrics = metrics or NULL_METRICS
         prepared = prepare_input(anomaly, segmentation, validation_results)
+        kw = self._domain_keywords or GAME.agent_keywords
 
         return self._chain.invoke(
             {
+                "role_descriptor": kw.role_descriptor,
+                "primary_kpis": ", ".join(kw.primary_kpis),
                 "anomaly_json": json.dumps(
                     prepared["anomaly"], ensure_ascii=False,
                 ),
