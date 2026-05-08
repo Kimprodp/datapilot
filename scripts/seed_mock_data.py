@@ -738,6 +738,7 @@ def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
     conn.execute("DROP TABLE IF EXISTS products")
     conn.execute("DROP TABLE IF EXISTS promotions")
     conn.execute("DROP TABLE IF EXISTS category_daily_revenue")
+    conn.execute("DROP TABLE IF EXISTS inventory_changes")
 
     conn.execute("""
         CREATE TABLE daily_kpi (
@@ -797,6 +798,18 @@ def create_ecommerce_tables(conn: duckdb.DuckDBPyConnection):
             gmv      DECIMAL NOT NULL,
             orders   INTEGER NOT NULL,
             PRIMARY KEY (date, category)
+        )
+    """)
+
+    # 시점별 재고 상태 변경 이력 — ④ Validator 가 "D-7 부터 품절" 같은
+    # 시점별 SQL 검증을 할 수 있도록.
+    conn.execute("""
+        CREATE TABLE inventory_changes (
+            change_id   VARCHAR PRIMARY KEY,
+            product_id  VARCHAR NOT NULL,
+            changed_at  TIMESTAMP NOT NULL,
+            status      VARCHAR NOT NULL,  -- in_stock / out_of_stock / discontinued
+            note        VARCHAR
         )
     """)
 
@@ -956,6 +969,50 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
     print(f"orders: {len(rows)}건 삽입")
 
 
+def seed_ecommerce_inventory_changes(conn: duckdb.DuckDBPyConnection):
+    """시점별 재고 변경 이력. 시나리오 B 의 핵심 시점 신호.
+
+    초기 상태 (D-30 시점) 모든 상품 in_stock 등록 + p_kitchen_01 의 D-7 시점
+    out_of_stock 변경 기록. ④ Validator 가 ``WHERE changed_at >= ?`` 시점별
+    SQL 로 시나리오 B 의 결정적 증거 잡을 수 있게 함.
+    """
+    rows = []
+    seq = 0
+    # 초기 등록 — 모든 상품이 데이터 시작일에 in_stock
+    init_at = datetime.combine(ECOMMERCE_START, datetime.min.time())
+    for category in ECOMMERCE_CATEGORIES:
+        for i in range(1, PRODUCTS_PER_CATEGORY + 1):
+            pid = f"p_{category}_{i:02d}"
+            rows.append((
+                f"ic_{seq:05d}",
+                pid,
+                init_at,
+                "in_stock",
+                "초기 등록",
+            ))
+            seq += 1
+
+    # 시나리오 B 핵심: D-7 (2026-03-24) 에 p_kitchen_01 out_of_stock 전환
+    rows.append((
+        f"ic_{seq:05d}",
+        TOP_KITCHEN_PRODUCT,
+        datetime.combine(INVENTORY_OUT_DATE, datetime.min.time()),
+        "out_of_stock",
+        "재고 소진 (보충 일정 미정)",
+    ))
+
+    conn.executemany(
+        "INSERT INTO inventory_changes "
+        "(change_id, product_id, changed_at, status, note) "
+        "VALUES (?, ?, ?, ?, ?)",
+        rows,
+    )
+    print(
+        f"inventory_changes: {len(rows)}건 삽입 "
+        f"(p_kitchen_01 out_of_stock = {INVENTORY_OUT_DATE})"
+    )
+
+
 def seed_ecommerce_category_daily_revenue(conn: duckdb.DuckDBPyConnection):
     """orders 집계 → category_daily_revenue."""
     conn.execute("""
@@ -976,7 +1033,12 @@ def seed_ecommerce_category_daily_revenue(conn: duckdb.DuckDBPyConnection):
 
 
 def seed_ecommerce_daily_kpi(conn: duckdb.DuckDBPyConnection):
-    """orders 집계 + 모의 visitors 로 daily_kpi 생성."""
+    """orders 집계 + 모의 visitors 로 daily_kpi 생성.
+
+    visitors 는 orders 와 **독립적으로** 일정 유지 (~15000) — 시나리오 B
+    (재고 부족) 의 진짜 원인이 "방문자 감소" 가 아닌 "전환율 하락 (재고 없음)"
+    임을 LLM 이 추론하게 하기 위함.
+    """
     # orders 집계
     rows = conn.execute("""
         SELECT
@@ -991,8 +1053,9 @@ def seed_ecommerce_daily_kpi(conn: duckdb.DuckDBPyConnection):
 
     insert_rows = []
     for d, gmv, orders, _unique in rows:
-        # 방문자 ~ 주문수의 ~30 배 (전환율 ~3.3%)
-        visitors = int(orders * 30 + random.randint(-200, 200))
+        # 방문자 = 일정 (~15000). orders 변동과 무관 — 전환율 변동으로 시나리오
+        # 신호가 노출되도록 함.
+        visitors = 15000 + random.randint(-500, 500)
         conversion = orders / visitors if visitors else 0.0
         # payment_success_rate — 양 도메인 안정 KPI (~0.97). 본 mock 에선 영향 X
         psr = round(0.965 + random.uniform(-0.005, 0.010), 4)
@@ -1055,6 +1118,7 @@ def main():
         seed_ecommerce_products(conn)
         seed_ecommerce_promotions(conn)
         seed_ecommerce_orders(conn)
+        seed_ecommerce_inventory_changes(conn)
         seed_ecommerce_category_daily_revenue(conn)
         seed_ecommerce_daily_kpi(conn)
         print(f"\n이커머스 DB 생성 완료: {ECOMMERCE_DB_PATH}")
