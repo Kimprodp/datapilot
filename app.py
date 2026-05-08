@@ -13,7 +13,9 @@ from datetime import date, timedelta
 
 import streamlit as st
 
+from datapilot.agents import AgentBundle
 from datapilot.demo import run_demo
+from datapilot.domain import DOMAINS
 from datapilot.pipeline import (
     AnomalyAnalysis,
     PipelineOrchestrator,
@@ -21,7 +23,7 @@ from datapilot.pipeline import (
     PipelineStep,
     UnanalyzedAnomaly,
 )
-from datapilot.repository.duckdb_adapter import DuckDBAdapter
+from datapilot.repository import make_repository
 
 
 # ------------------------------------------------------------------
@@ -41,6 +43,24 @@ _PERIOD_OPTIONS = {
     "최근 14일": 14,
     "최근 30일": 30,
 }
+
+#: 산업 selectbox 변경 시 비울 session_state 키 — 이전 도메인 분석 결과 잔존 방지.
+#: 새 분석 결과 키 추가 시 본 set 도 갱신해야 함 (회귀 차단은 test_session_state_reset.py).
+RESET_ON_DOMAIN_CHANGE: frozenset[str] = frozenset({
+    "report",
+    "selected_anomaly_idx",
+})
+
+
+def _on_domain_change() -> None:
+    """산업 selectbox 변경 콜백.
+
+    이전 도메인의 분석 결과 / 선택 상태를 비워 화면이 새 도메인 기준으로 자연
+    렌더되도록 한다. ``make_repository`` 의 ``@st.cache_resource`` 도 도메인이
+    바뀌면 별도 인스턴스가 생성되므로 별도 invalidate 불필요.
+    """
+    for k in RESET_ON_DOMAIN_CHANGE:
+        st.session_state.pop(k, None)
 
 _SEVERITY_COLORS = {
     "HIGH": ("#fce4e4", "#c0392b"),
@@ -187,12 +207,23 @@ def _render_anomaly_summary(anomaly_item) -> None:
 def page_start() -> None:
     _app_header()
 
-    # 게임 선택
+    # 산업 (도메인) 선택
     st.markdown(
-        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>게임 선택</div>",
+        "<div style='font-size:14px;font-weight:600;margin-bottom:2px;'>산업 선택</div>",
         unsafe_allow_html=True,
     )
-    game = st.selectbox("게임 선택", ["Pizza Ready"], index=0, label_visibility="collapsed")
+    domain_keys = list(DOMAINS.keys())  # ["game", "ecommerce"]
+    if "domain" not in st.session_state:
+        st.session_state.domain = "game"
+    st.selectbox(
+        "산업 선택",
+        domain_keys,
+        format_func=lambda d: DOMAINS[d].ui_labels.industry_name,
+        key="domain",
+        on_change=_on_domain_change,
+        label_visibility="collapsed",
+    )
+    domain = st.session_state.domain
 
     # 화면1 공통 CSS
     st.markdown("""<style>
@@ -241,8 +272,9 @@ def page_start() -> None:
         days = _PERIOD_OPTIONS[period_label]
         today = date(2026, 3, 31)  # Mock 데이터 기준일
         p = (today - timedelta(days=days - 1), today)
-        st.session_state.game_id = "pizza_ready"
-        st.session_state.game_name = game
+        cfg = DOMAINS[domain]
+        st.session_state.entity_id = cfg.ui_labels.entity_default_id
+        st.session_state.industry_name = cfg.ui_labels.industry_name
         st.session_state.period = p
         st.session_state.period_label = period_label
         st.session_state.is_demo = is_demo
@@ -350,7 +382,7 @@ def page_running() -> None:
     else:
         date_range = st.session_state.period_label
     st.subheader(
-        f"{st.session_state.game_name} ({date_range}) 분석 중..."
+        f"{st.session_state.industry_name} ({date_range}) 분석 중..."
     )
 
     detection_ph = st.empty()
@@ -506,9 +538,11 @@ def page_running() -> None:
     def _run_pipeline() -> PipelineReport:
         if st.session_state.get("is_demo", False):
             return run_demo(on_step=on_step)
-        with DuckDBAdapter() as repo:
-            return PipelineOrchestrator(repo).run(
-                st.session_state.game_id,
+        domain = st.session_state.domain
+        with make_repository(domain) as repo:
+            agents = AgentBundle.create(domain, repo=repo)
+            return PipelineOrchestrator(repo, agents=agents).run(
+                st.session_state.entity_id,
                 st.session_state.period,
                 on_step=on_step,
             )
@@ -667,7 +701,7 @@ def page_report() -> None:
     else:
         date_range = st.session_state.period_label
     st.subheader(
-        f"분석 완료 — {st.session_state.game_name} ({date_range})"
+        f"분석 완료 — {st.session_state.industry_name} ({date_range})"
     )
 
     if not report.analyzed and not report.unanalyzed:
