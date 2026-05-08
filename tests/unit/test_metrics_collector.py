@@ -153,15 +153,19 @@ class TestOnLlmEnd:
         assert "request_id" not in call
         assert "system_fingerprint" not in call
 
-    def test_unfolds_nested_input_token_details(self, tmp_path):
-        """LangChain 0.2+ 의 nested cache 키 구조 (input_token_details) 펼침."""
+    def test_unfolds_nested_input_token_details_short_keys(self, tmp_path):
+        """LangChain UsageMetadata 의 input_token_details 짧은 키 매핑.
+
+        LangChain 0.2+ 는 nested 안에서 ``cache_creation`` / ``cache_read``
+        (짧은 키) 를 사용 — 이걸 표준 Anthropic API 키로 정규화해야 한다.
+        """
         m = MetricsCollector(log_dir=tmp_path)
         m.on_llm_end(_llm_result({
             "input_tokens": 100,
             "output_tokens": 50,
             "input_token_details": {
-                "cache_creation_input_tokens": 800,
-                "cache_read_input_tokens": 200,
+                "cache_creation": 800,
+                "cache_read": 200,
             },
         }))
         m.flush()
@@ -169,6 +173,21 @@ class TestOnLlmEnd:
         call = log["llm_calls"][0]
         assert call["cache_creation_input_tokens"] == 800
         assert call["cache_read_input_tokens"] == 200
+
+    def test_uses_long_keys_when_present(self, tmp_path):
+        """raw response_metadata.usage 는 긴 키 (..._input_tokens) 그대로."""
+        m = MetricsCollector(log_dir=tmp_path)
+        m.on_llm_end(_llm_result_raw_usage({
+            "input_tokens": 50,
+            "output_tokens": 25,
+            "cache_creation_input_tokens": 600,
+            "cache_read_input_tokens": 100,
+        }))
+        m.flush()
+        log = json.loads((tmp_path / f"{m.run_id}.jsonl").read_text("utf-8"))
+        call = log["llm_calls"][0]
+        assert call["cache_creation_input_tokens"] == 600
+        assert call["cache_read_input_tokens"] == 100
 
     def test_falls_back_to_response_metadata_usage(self, tmp_path):
         """usage_metadata 가 없으면 response_metadata.usage 에서 추출."""

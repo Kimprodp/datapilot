@@ -24,12 +24,12 @@ from datapilot.agents import (
 )
 
 
-# (모듈, system 블록 상수, 원본 시스템 프롬프트) 6 에이전트 + ④ verdict
+# (모듈, system 블록 상수, 원본 시스템 프롬프트)
+# ③④ 는 가용 스키마를 system 으로 합쳐 invoke 시점에 동적 빌드 (build_system_content)
+# → 정적 _SYSTEM_BLOCKS 가 없음. 별도 TestDynamicSystemBuild 클래스에서 검증.
 _AGENTS: list[tuple[str, list[dict[str, Any]], str]] = [
     ("bottleneck_detector", bd._SYSTEM_BLOCKS, bd.SYSTEM_PROMPT),
     ("segmentation_analyzer", sa._SYSTEM_BLOCKS, sa.SYSTEM_PROMPT),
-    ("hypothesis_generator", hg._SYSTEM_BLOCKS, hg.SYSTEM_PROMPT),
-    ("data_validator", dv._SYSTEM_BLOCKS, dv.SYSTEM_PROMPT),
     ("root_cause_reasoner", rc._SYSTEM_BLOCKS, rc.SYSTEM_PROMPT),
     ("action_recommender", ar._SYSTEM_BLOCKS, ar.SYSTEM_PROMPT),
 ]
@@ -67,20 +67,59 @@ class TestSystemBlocks:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 2. ④ Validator verdict_chain 도 별도 cache_control
+# 2. ③ HypothesisGenerator + ④ DataValidator — 동적 system 빌드
 # ════════════════════════════════════════════════════════════════════
 
 
-class TestValidatorVerdictBlocks:
-    def test_verdict_blocks_has_ephemeral_cache_control(self):
-        for i, block in enumerate(dv._VERDICT_SYSTEM_BLOCKS):
-            assert block["cache_control"] == {"type": "ephemeral"}, (
-                f"verdict block[{i}] 에 cache_control 없음"
-            )
+class TestDynamicSystemBuild:
+    """③④ 는 가용 스키마를 system 으로 합쳐 invoke 시점에 빌드한다.
 
-    def test_verdict_block_text_matches_constant(self):
-        joined = "".join(b.get("text", "") for b in dv._VERDICT_SYSTEM_BLOCKS)
-        assert joined == dv._VERDICT_SYSTEM
+    이 패턴은 시스템 프롬프트 단독 (523 토큰) 으로는 캐싱 임계 1024 토큰 미달
+    이라 효과 0 인 문제를 해결한다 — schema 와 합쳐 임계 충족.
+    """
+
+    def _light_schema(self) -> dict[str, Any]:
+        return {
+            "tables": [
+                {"name": "payments", "description": "결제 시도 로그"},
+                {"name": "users", "description": "유저 메타정보"},
+            ]
+        }
+
+    def test_hypothesis_generator_blocks_have_cache_control(self):
+        blocks = hg.build_system_content(self._light_schema())
+        # 마지막 block 에 cache_control 부착 → 그 블록까지의 prefix 가 cache 대상
+        assert blocks[-1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_hypothesis_generator_blocks_contain_system_prompt(self):
+        blocks = hg.build_system_content(self._light_schema())
+        joined = "".join(b["text"] for b in blocks)
+        assert hg.SYSTEM_PROMPT in joined
+
+    def test_hypothesis_generator_blocks_contain_schema(self):
+        blocks = hg.build_system_content(self._light_schema())
+        joined = "".join(b["text"] for b in blocks)
+        assert "payments" in joined
+        assert "users" in joined
+
+    def test_data_validator_blocks_have_cache_control(self):
+        blocks = dv.build_system_content(self._light_schema())
+        assert blocks[-1]["cache_control"] == {"type": "ephemeral"}
+
+    def test_data_validator_blocks_contain_system_prompt(self):
+        blocks = dv.build_system_content(self._light_schema())
+        joined = "".join(b["text"] for b in blocks)
+        assert dv.SYSTEM_PROMPT in joined
+
+    def test_data_validator_blocks_contain_schema(self):
+        blocks = dv.build_system_content(self._light_schema())
+        joined = "".join(b["text"] for b in blocks)
+        assert "payments" in joined
+
+    def test_user_template_no_longer_has_schema_placeholder(self):
+        """가용 스키마가 system 으로 옮겨졌으므로 user template 에 변수 없음."""
+        assert "{available_schema_json}" not in hg.USER_PROMPT_TEMPLATE
+        assert "{available_schema_json}" not in dv.USER_PROMPT_TEMPLATE
 
 
 # ════════════════════════════════════════════════════════════════════
