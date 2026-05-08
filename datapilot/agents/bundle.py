@@ -26,7 +26,7 @@ from datapilot.repository.port import DataRepository
 
 @dataclass(frozen=True)
 class AgentBundle:
-    """6 에이전트 인스턴스 묶음."""
+    """6 에이전트 인스턴스 묶음 + 도메인 segmentable KPI 셋."""
 
     bottleneck: BottleneckDetector
     segmenter: SegmentationAnalyzer
@@ -34,6 +34,9 @@ class AgentBundle:
     validator: DataValidator
     reasoner: RootCauseReasoner
     recommender: ActionRecommender
+    #: ② SegmentationAnalyzer 가 분해 가능한 KPI 셋. Pipeline 이 anomaly 의
+    #: segmentable / non-segmentable 분류에 사용.
+    supported_segment_metrics: frozenset[str]
 
     @classmethod
     def create(cls, domain: str, *, repo: DataRepository) -> "AgentBundle":
@@ -66,4 +69,5 @@ class AgentBundle:
             ),
             reasoner=RootCauseReasoner(domain_keywords=kw),
             recommender=ActionRecommender(domain_keywords=kw),
+            supported_segment_metrics=cfg.supported_segment_metrics,
         )

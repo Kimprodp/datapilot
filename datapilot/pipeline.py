@@ -41,10 +41,7 @@ from datapilot.agents.segmentation_analyzer import (
     SegmentationReport,
 )
 from datapilot.observability import NULL_METRICS, MetricsCollector
-from datapilot.repository.port import DataRepository, get_supported_segment_metrics
-
-# 게임 디폴트 — 도메인별 인자 처리는 후속 task (`AgentBundle.create + Pipeline agents`) 에서.
-_SEGMENT_METRICS = get_supported_segment_metrics("game")
+from datapilot.repository.port import DataRepository
 
 # ------------------------------------------------------------------
 # 파이프라인 State 모델
@@ -145,6 +142,8 @@ class PipelineOrchestrator:
         self._validator = agents.validator
         self._reasoner = agents.reasoner
         self._recommender = agents.recommender
+        # 도메인 segmentable KPI 셋 — anomaly 분류에 사용
+        self._segment_metrics = agents.supported_segment_metrics
 
     def run(
         self,
@@ -199,7 +198,7 @@ class PipelineOrchestrator:
             segmentable: list[AnomalyItem] = []
             non_segmentable: list[AnomalyItem] = []
             for a in anomaly_report.anomalies:
-                if a.metric in _SEGMENT_METRICS:
+                if a.metric in self._segment_metrics:
                     segmentable.append(a)
                 else:
                     non_segmentable.append(a)

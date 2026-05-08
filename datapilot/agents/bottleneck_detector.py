@@ -136,7 +136,7 @@ _SYSTEM_BLOCKS = [
 ]
 
 USER_PROMPT_TEMPLATE = """\
-다음은 게임 {game_id}의 최근 {days}일 KPI 시계열이다.
+다음은 {entity_id} 의 최근 {days}일 KPI 시계열이다.
 
 {kpi_series_json}
 
@@ -209,7 +209,7 @@ class BottleneckDetector:
         metrics = metrics or NULL_METRICS
         return self._chain.invoke(
             {
-                "game_id": kpi_series["game_id"],
+                "entity_id": kpi_series["entity_id"],
                 "days": len(kpi_series["daily"]),
                 "kpi_series_json": json.dumps(
                     kpi_series["daily"], ensure_ascii=False,
