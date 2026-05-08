@@ -198,6 +198,23 @@ _VERDICT_USER = """\
 분석 결과:
 {analysis}"""
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+# ④ Validator 는 라운드 곱셈으로 캐싱 효과의 90% 차지하는 핵심 위치.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+_VERDICT_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": _VERDICT_SYSTEM,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 
 # ──────────────────────────────────────────────────────────────────
 # Validator
@@ -240,7 +257,7 @@ class DataValidator:
         self._llm_with_tools = base_llm.bind_tools([self._execute_sql_tool])
         self._verdict_chain = (
             ChatPromptTemplate.from_messages([
-                ("system", _VERDICT_SYSTEM),
+                SystemMessage(content=_VERDICT_SYSTEM_BLOCKS),
                 ("user", _VERDICT_USER),
             ])
             | base_llm.with_structured_output(_BatchVerdict)
@@ -402,7 +419,7 @@ class DataValidator:
             ),
         )
         messages: list[Any] = [
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             HumanMessage(content=user_content),
         ]
 

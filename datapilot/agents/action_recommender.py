@@ -24,6 +24,7 @@ from typing import Any, Literal
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -114,6 +115,15 @@ SYSTEM_PROMPT = (
     "출력은 반드시 지정된 JSON 스키마를 따른다."
 )
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 USER_PROMPT_TEMPLATE = (
     "다음은 이상 지표의 근본 원인 분석 결과다.\n\n"
     "[이상 지표]\n"
@@ -156,7 +166,7 @@ class ActionRecommender:
                 temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(ActionPlan)

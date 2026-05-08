@@ -21,6 +21,7 @@ import json
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -91,6 +92,15 @@ PM이 "어떤 데이터를 추가 수집해야 하는지" 알 수 있게 해주�
 
 출력은 반드시 지정된 JSON 스키마를 따른다."""
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 USER_PROMPT_TEMPLATE = """\
 다음은 게임 {game_id}의 이상 분석 결과다.
 
@@ -139,7 +149,7 @@ class HypothesisGenerator:
                 max_retries=3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(HypothesisList)

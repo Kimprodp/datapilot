@@ -26,6 +26,7 @@ from typing import Literal
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -105,6 +106,15 @@ summary에는 영문 코드명·괄호 표기를 제외하고 한글 지표명�
 국가명은 한글로 표기한다 (예: brazil → 브라질). \
 플랫폼(Android, iOS)은 그대로 사용한다."""
 
+# Anthropic Prompt Caching: 정적 시스템 프롬프트를 ephemeral 캐싱한다.
+_SYSTEM_BLOCKS = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
 
 # ──────────────────────────────────────────────────────────────────
 # Analyzer
@@ -133,7 +143,7 @@ class SegmentationAnalyzer:
                 temperature=0.3,
             )
         self._prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
+            SystemMessage(content=_SYSTEM_BLOCKS),
             ("user", USER_PROMPT_TEMPLATE),
         ])
         self._chain = self._prompt | llm.with_structured_output(

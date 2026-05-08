@@ -7,6 +7,7 @@ screen-spec.md + wireframe.html 기반 구현.
 from __future__ import annotations
 
 import re
+import sys
 import time
 from datetime import date, timedelta
 
@@ -525,8 +526,16 @@ def page_running() -> None:
             f"color:#aaa;'>{_format_elapsed(time.time() - start_time)}</div>",
             unsafe_allow_html=True,
         )
+        # cache_control / Prompt Caching 관련 에러는 운영자 디버깅 영역.
+        # PM UI 에는 일반화된 메시지만 노출하고 원문은 stderr 로 보낸다.
+        exc_text = str(exc).lower()
+        if "cache_control" in exc_text or "cache control" in exc_text:
+            user_msg = "AI 분석 일시 오류, 다시 시도해주세요"
+            print(f"[anthropic cache error] {exc!r}", file=sys.stderr)
+        else:
+            user_msg = f"분석 중 오류가 발생했습니다: {exc}"
         with error_ph.container():
-            st.error(f"분석 중 오류가 발생했습니다: {exc}")
+            st.error(user_msg)
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("다시 시도", type="primary", use_container_width=True):
