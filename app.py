@@ -251,6 +251,9 @@ def page_start() -> None:
         label_visibility="collapsed",
     )
     domain = st.session_state.domain
+    # selectbox widget 이 page 이동 시 cleanup 되어도 도메인 살리도록 별도 키에 보존.
+    # page_complete 의 가설 카드 SQL 트레이싱이 이 키로 도메인 식별.
+    st.session_state.active_domain = domain
 
     # 가상 데이터 viewer (expander 자체가 토글 — 외부 버튼 불필요)
     try:
@@ -856,7 +859,8 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
             analysis.validation_results,
             key=lambda vr: _VALIDATION_SORT.get(vr.status, 3),
         )
-        domain = st.session_state.get("domain", "game")
+        # active_domain 우선 — page_complete 에서 selectbox 사라져도 도메인 식별 유지.
+        domain = st.session_state.get("active_domain") or st.session_state.get("domain", "game")
         with make_repository(domain) as repo:
             for vi, vr in enumerate(sorted_results):
                 vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
