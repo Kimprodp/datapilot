@@ -434,6 +434,95 @@ class DuckDBAdapter(DataRepository):
         rows = cursor.fetchmany(max_rows)
         return [dict(zip(columns, row)) for row in rows]
 
+    # ──────────────────────────────────────────────────────
+    # ⑤ mock-data-viewer 전용 (테이블 row / 카운트 조회)
+    # ──────────────────────────────────────────────────────
+
+    def get_table_rows(
+        self,
+        table: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        order_desc: bool = True,
+    ) -> list[dict[str, Any]]:
+        """화이트리스트 검증된 테이블의 row 목록을 반환 (read-only).
+
+        화이트리스트 = ``DOMAINS[self._domain].allowed_tables``. datetime 컬럼은
+        ``information_schema`` 에서 ``data_type LIKE 'TIMESTAMP%' OR data_type = 'DATE'``
+        매칭 후 ``ordinal_position`` 첫 번째 컬럼 사용. 없으면 ORDER BY 생략.
+
+        Tool Use 4중 방어 영역과 분리 — 본 메서드는 LLM 미경유, 코드가 직접 SQL 빌드.
+
+        Args:
+            table: ``DOMAINS[self._domain].allowed_tables`` 안에 있어야 함.
+            limit: 반환 row 수 (기본 50). 1 이상.
+            offset: 건너뛸 row 수 (기본 0). 0 이상.
+            order_desc: True 시 첫 datetime 컬럼 기준 DESC. 없으면 무시.
+
+        Raises:
+            ValueError: table 이 화이트리스트 외 / limit ≤ 0 / offset < 0.
+        """
+        if limit <= 0:
+            raise ValueError(f"limit 은 1 이상이어야 합니다: {limit}")
+        if offset < 0:
+            raise ValueError(f"offset 은 0 이상이어야 합니다: {offset}")
+        self._validate_viewer_table(table)
+
+        order_clause = ""
+        if order_desc:
+            date_col = self._first_datetime_column(table)
+            if date_col is not None:
+                order_clause = f' ORDER BY "{date_col}" DESC'
+
+        sql = f'SELECT * FROM "{table}"{order_clause} LIMIT ? OFFSET ?'
+        cursor = self._conn.execute(sql, [limit, offset])
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        rows = cursor.fetchall()
+        return [dict(zip(columns, row)) for row in rows]
+
+    def get_table_row_count(self, table: str) -> int:
+        """화이트리스트 검증된 테이블의 총 row 수 (``SELECT COUNT(*)``).
+
+        화이트리스트 = ``DOMAINS[self._domain].allowed_tables``.
+
+        Raises:
+            ValueError: table 이 화이트리스트 외.
+        """
+        self._validate_viewer_table(table)
+        result = self._conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()
+        return int(result[0]) if result is not None else 0
+
+    def _validate_viewer_table(self, table: str) -> None:
+        """viewer 가 접근 가능한 테이블 화이트리스트 검증."""
+        allowed = DOMAINS[self._domain].allowed_tables
+        if table not in allowed:
+            raise ValueError(
+                f"화이트리스트 외 테이블: {table!r}. 허용 = {sorted(allowed)}"
+            )
+
+    def _first_datetime_column(self, table: str) -> str | None:
+        """``information_schema`` 에서 첫 datetime 컬럼명 반환 (``ordinal_position`` 순).
+
+        매칭 = ``data_type LIKE 'TIMESTAMP%' OR data_type = 'DATE'`` (DuckDB
+        가 ``TIMESTAMP_TZ`` / ``TIMESTAMPTZ`` / ``TIMESTAMP WITH TIME ZONE``
+        등 변형 표기 가능성 — 양 도메인 mock 사전 실측은 단순 ``TIMESTAMP`` /
+        ``DATE`` 만 사용 확인됨).
+        """
+        row = self._conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'main'
+              AND table_name = ?
+              AND (data_type LIKE 'TIMESTAMP%' OR data_type = 'DATE')
+            ORDER BY ordinal_position
+            LIMIT 1
+            """,
+            [table],
+        ).fetchone()
+        return row[0] if row else None
+
 
 # ──────────────────────────────────────────────────────────────────
 # 내부 유틸
