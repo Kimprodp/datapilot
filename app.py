@@ -846,33 +846,69 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
 
 
 def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
-    """카드 3: 가설과 검증 (③+④)."""
+    """카드 3: 가설과 검증 (③+④).
+
+    SQL 트레이싱 동적 실행을 위해 카드당 ``make_repository`` conn 1 회 open.
+    """
     with st.container(border=True):
         st.markdown(_card_header("가설과 검증", "③ 가설 생성 + ④ 데이터 검증"), unsafe_allow_html=True)
         sorted_results = sorted(
             analysis.validation_results,
             key=lambda vr: _VALIDATION_SORT.get(vr.status, 3),
         )
-        for vi, vr in enumerate(sorted_results):
-            vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
-            badge = _badge_html(vr_label, bg, fg)
-            ev_color = "#555" if vr.status == "supported" else "#888"
-            ev_raw = vr.evidence or vr.required_data or ""
-            # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
-            ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
-            is_last = vi == len(sorted_results) - 1
-            border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
-            st.markdown(
-                f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
-                f"{border}'>"
-                f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
-                f"<div>"
-                f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
-                f"<div style='font-size:13px;color:{ev_color};margin-top:4px;line-height:1.5;'>{ev_text}</div>"
-                f"</div></div>",
-                unsafe_allow_html=True,
-            )
+        domain = st.session_state.get("domain", "game")
+        with make_repository(domain) as repo:
+            for vi, vr in enumerate(sorted_results):
+                vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
+                badge = _badge_html(vr_label, bg, fg)
+                ev_color = "#555" if vr.status == "supported" else "#888"
+                ev_raw = vr.evidence or vr.required_data or ""
+                # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
+                ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
+                is_last = vi == len(sorted_results) - 1
+                st.markdown(
+                    f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0 4px 0;'>"
+                    f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
+                    f"<div>"
+                    f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
+                    f"<div style='font-size:13px;color:{ev_color};margin-top:4px;line-height:1.5;'>{ev_text}</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+                _render_validation_sql_trace(vr, repo)
+                if not is_last:
+                    st.markdown(
+                        "<div style='border-bottom:1px solid #f0f0f0;margin:6px 0;'></div>",
+                        unsafe_allow_html=True,
+                    )
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+
+def _render_validation_sql_trace(vr, repo) -> None:
+    """가설 검증에 사용된 SQL 을 **실 mock DB 에서 동적 실행해** 결과 노출.
+
+    평가자가 "AI 가 어떤 데이터로 이 가설을 판정했는지" 직접 확인 가능.
+    데모 / 라이브 모드 모두 결과는 실 mock 에서 가져옴 — 픽션 0.
+
+    SQL 0 개면 expander 생략 (검증 실패 / unverified 의 일부).
+    """
+    if not vr.queries_run:
+        return
+    n = len(vr.queries_run)
+    with st.expander(f"검증에 사용한 SQL 및 결과 ({n}개) 보기", expanded=False):
+        for qi, query in enumerate(vr.queries_run):
+            st.code(query, language="sql")
+            try:
+                rows = repo.execute_readonly_sql(query, max_rows=100)
+            except Exception as exc:  # noqa: BLE001 — graceful 노출
+                st.caption(f"SQL 실행 실패: {exc}")
+            else:
+                if rows:
+                    st.dataframe(rows, hide_index=True)
+                else:
+                    st.caption("결과 없음 (빈 결과)")
+            if qi < n - 1:
+                st.divider()
 
 
 def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:

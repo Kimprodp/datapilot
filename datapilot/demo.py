@@ -146,6 +146,18 @@ def _demo_payment_success_rate() -> AnomalyAnalysis:
                 "(apple_pay·google_play·stripe)는 95.7~100% 성공률을 유지해 "
                 "브라질 단독 PG사 장애임이 명확하다."
             ),
+            queries_run=[
+                "SELECT name, region, status\n"
+                "FROM gateways\n"
+                "WHERE region = 'brazil'",
+                "SELECT DATE(attempt_time) AS date, gateway,\n"
+                "       COUNT(*) AS attempts,\n"
+                "       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS successes\n"
+                "FROM payment_attempts\n"
+                "WHERE DATE(attempt_time) BETWEEN '2026-03-30' AND '2026-03-31'\n"
+                "GROUP BY DATE(attempt_time), gateway\n"
+                "ORDER BY date, gateway",
+            ],
         ),
         ValidationResult(
             hypothesis="브라질 현지 결제 수단(PIX/Boleto 등) 연동 오류 또는 정책 변경",
@@ -156,6 +168,16 @@ def _demo_payment_success_rate() -> AnomalyAnalysis:
                 "3/31에 최초 출현했다. 총 17건의 실패가 해당 에러 코드로 집중되어 "
                 "PagSeguro 연동 자체의 인프라/API 단절이 명확히 확인된다."
             ),
+            queries_run=[
+                "SELECT pa.error_code, COUNT(*) AS error_count\n"
+                "FROM payment_attempts pa\n"
+                "JOIN users u ON pa.user_id = u.user_id\n"
+                "WHERE u.country = 'brazil'\n"
+                "  AND pa.status = 'failed'\n"
+                "  AND DATE(pa.attempt_time) = '2026-03-31'\n"
+                "GROUP BY pa.error_code\n"
+                "ORDER BY error_count DESC",
+            ],
         ),
         ValidationResult(
             hypothesis="브라질 대상 앱 업데이트 또는 결제 모듈 변경 배포",
@@ -165,6 +187,17 @@ def _demo_payment_success_rate() -> AnomalyAnalysis:
                 "브라질 결제 성공률은 94~96% 정상 범위를 유지. 3/31 급락은 "
                 "배포와 무관한 PG사 장애 시점과 일치한다."
             ),
+            queries_run=[
+                "SELECT DATE(pa.attempt_time) AS date,\n"
+                "       COUNT(*) AS attempts,\n"
+                "       SUM(CASE WHEN pa.status='success' THEN 1 ELSE 0 END) AS successes\n"
+                "FROM payment_attempts pa\n"
+                "JOIN users u ON pa.user_id = u.user_id\n"
+                "WHERE u.country = 'brazil'\n"
+                "  AND DATE(pa.attempt_time) BETWEEN '2026-03-28' AND '2026-03-31'\n"
+                "GROUP BY DATE(pa.attempt_time)\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="브라질 헤알(BRL) 환율 급변 또는 현지 통화 처리 로직 오류",
@@ -174,6 +207,15 @@ def _demo_payment_success_rate() -> AnomalyAnalysis:
                 "(Gateway/Connection/Service 장애)으로 통화 변환 오류 코드는 0건. "
                 "환율 이슈가 아닌 PG 인프라 장애로 판정된다."
             ),
+            queries_run=[
+                "SELECT pa.error_code, COUNT(*) AS error_count\n"
+                "FROM payment_attempts pa\n"
+                "JOIN users u ON pa.user_id = u.user_id\n"
+                "WHERE u.country = 'brazil'\n"
+                "  AND pa.status = 'failed'\n"
+                "  AND DATE(pa.attempt_time) = '2026-03-31'\n"
+                "GROUP BY pa.error_code",
+            ],
         ),
     ]
     root_cause = RootCauseReport(
@@ -332,6 +374,21 @@ def _demo_revenue() -> AnomalyAnalysis:
                 "3/31 PagSeguro 성공률 29.2%로 폭락해 브라질 매출 -14.2% 하락에 "
                 "직접 기여. 전체 결제 성공률 97.6%→88.6% 연동."
             ),
+            queries_run=[
+                "SELECT date, payment_success_rate, revenue\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-29' AND '2026-03-31'\n"
+                "ORDER BY date",
+                "SELECT u.country,\n"
+                "       SUM(p.amount) AS revenue,\n"
+                "       COUNT(*) AS payment_count\n"
+                "FROM payments p\n"
+                "JOIN users u ON p.user_id = u.user_id\n"
+                "WHERE DATE(p.timestamp) = '2026-03-31'\n"
+                "  AND p.status = 'success'\n"
+                "GROUP BY u.country\n"
+                "ORDER BY revenue DESC",
+            ],
         ),
         ValidationResult(
             hypothesis="최근 앱 업데이트에서 상점 UI 또는 결제 흐름 변경으로 구매 전환율 저하",
@@ -340,6 +397,21 @@ def _demo_revenue() -> AnomalyAnalysis:
                 "3/28 Android v1.2.3 업데이트('Shop UI refresh') 이후 슬롯 1~3의 "
                 "premium 상품 노출이 3/27 2,250건에서 867~918건으로 59~61% 급감함."
             ),
+            queries_run=[
+                "SELECT release_id, version, platform, released_at, build_notes\n"
+                "FROM releases\n"
+                "WHERE platform = 'android'\n"
+                "  AND released_at >= '2026-03-25'",
+                "SELECT DATE(si.impression_time) AS date, si.slot_order,\n"
+                "       COUNT(*) AS impressions\n"
+                "FROM shop_impressions si\n"
+                "JOIN products p ON si.product_id = p.product_id\n"
+                "WHERE p.price_tier = 'premium'\n"
+                "  AND DATE(si.impression_time) BETWEEN '2026-03-27' AND '2026-03-28'\n"
+                "  AND si.slot_order BETWEEN 1 AND 3\n"
+                "GROUP BY DATE(si.impression_time), si.slot_order\n"
+                "ORDER BY date, slot_order",
+            ],
         ),
         ValidationResult(
             hypothesis="고가 상품 구매 비중 감소(상품 믹스 변화)로 ARPPU 하락 → 매출 감소",
@@ -348,6 +420,16 @@ def _demo_revenue() -> AnomalyAnalysis:
                 "premium 결제 건수 3/26 134건 → 3/31 99건(-26%), "
                 "mid 결제 건수 22건 → 47건(+114%)로 상품 믹스 저가 전환 확인."
             ),
+            queries_run=[
+                "SELECT DATE(p.timestamp) AS date, pr.price_tier,\n"
+                "       COUNT(*) AS payment_count\n"
+                "FROM payments p\n"
+                "JOIN products pr ON p.product_id = pr.product_id\n"
+                "WHERE p.status = 'success'\n"
+                "  AND DATE(p.timestamp) IN ('2026-03-26', '2026-03-31')\n"
+                "GROUP BY DATE(p.timestamp), pr.price_tier\n"
+                "ORDER BY date, price_tier",
+            ],
         ),
         ValidationResult(
             hypothesis="이벤트/프로모션 종료로 할인 상품·구매 유인이 사라져 ARPPU 및 매출 동반 하락",
@@ -357,6 +439,12 @@ def _demo_revenue() -> AnomalyAnalysis:
                 "0건이나 매출은 3/18~3/24 평균 1,048,636원으로 유지됨. 매출 급락은 "
                 "3/25 이후 별개 요인(UI·PG)과 일치."
             ),
+            queries_run=[
+                "SELECT date, revenue\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-18' AND '2026-03-24'\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="브라질·미국 등 주요 시장의 환율 변동 또는 스토어 가격 정책 변경",
@@ -365,6 +453,17 @@ def _demo_revenue() -> AnomalyAnalysis:
                 "payment_attempts에서 BRL·USD 결제의 단가는 기존 범위를 유지하며 "
                 "환율/가격 변경 흔적 없음. 매출 하락은 건수 감소에 의한 것."
             ),
+            queries_run=[
+                "SELECT u.country,\n"
+                "       AVG(p.amount) AS avg_amount,\n"
+                "       COUNT(*) AS payment_count\n"
+                "FROM payments p\n"
+                "JOIN users u ON p.user_id = u.user_id\n"
+                "WHERE p.status = 'success'\n"
+                "  AND u.country IN ('brazil', 'usa')\n"
+                "  AND DATE(p.timestamp) BETWEEN '2026-03-25' AND '2026-03-31'\n"
+                "GROUP BY u.country",
+            ],
         ),
     ]
     root_cause = RootCauseReport(
@@ -527,6 +626,13 @@ def _demo_d7_retention() -> AnomalyAnalysis:
                 "급증. 해당 코호트의 D7 재방문율이 기존 대비 현저히 낮아 전체 "
                 "지표를 희석하는 효과 확인."
             ),
+            queries_run=[
+                "SELECT install_date, platform, COUNT(*) AS new_installs\n"
+                "FROM users\n"
+                "WHERE install_date BETWEEN '2026-03-22' AND '2026-03-26'\n"
+                "GROUP BY install_date, platform\n"
+                "ORDER BY install_date, platform",
+            ],
         ),
         ValidationResult(
             hypothesis="3월 중순 이벤트/콘텐츠 종료로 7일 후 복귀 동기 소멸",
@@ -535,6 +641,17 @@ def _demo_d7_retention() -> AnomalyAnalysis:
                 "'Pizza Festival Season 3'가 3/17 종료, 이후 event_participate "
                 "이벤트 로그가 완전히 0건으로 소멸."
             ),
+            queries_run=[
+                "SELECT content_id, content_type, name, start_date, end_date\n"
+                "FROM content_releases\n"
+                "WHERE name LIKE '%Pizza Festival%'",
+                "SELECT DATE(event_time) AS date, COUNT(*) AS event_count\n"
+                "FROM events\n"
+                "WHERE event_type = 'event_participate'\n"
+                "  AND DATE(event_time) BETWEEN '2026-03-15' AND '2026-03-20'\n"
+                "GROUP BY DATE(event_time)\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="Android 전용 앱 업데이트로 인한 성능·UX 악화",
@@ -543,6 +660,12 @@ def _demo_d7_retention() -> AnomalyAnalysis:
                 "3/28 Android v1.2.3 배포 이후 crash rate·세션 길이·로딩 시간 "
                 "모두 기존 범위 유지. 성능·UX 악화 흔적 없음."
             ),
+            queries_run=[
+                "SELECT date, avg_session_sec, sessions\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-26' AND '2026-03-31'\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="Android 버전 업데이트 시 초기 콘텐츠/온보딩 플로우 변경",
@@ -551,6 +674,16 @@ def _demo_d7_retention() -> AnomalyAnalysis:
                 "content_releases에 온보딩 플로우 변경 기록 없음. 3/28 업데이트는 "
                 "Shop UI 변경으로 한정됨."
             ),
+            queries_run=[
+                "SELECT release_id, version, platform, released_at, build_notes\n"
+                "FROM releases\n"
+                "WHERE released_at >= '2026-03-25'\n"
+                "  AND build_notes LIKE '%onboarding%'",
+                "SELECT release_id, version, build_notes\n"
+                "FROM releases\n"
+                "WHERE platform = 'android'\n"
+                "  AND released_at >= '2026-03-25'",
+            ],
         ),
     ]
     root_cause = RootCauseReport(
@@ -755,6 +888,16 @@ def _demo_orders() -> AnomalyAnalysis:
                 "원인임이 명확하다. 전체 주문 감소분(-63건)이 kitchen 감소분"
                 "(-63건)과 정확히 일치한다."
             ),
+            queries_run=[
+                "SELECT change_id, product_id, changed_at, status, note\n"
+                "FROM inventory_changes\n"
+                "WHERE product_id = 'p_kitchen_01'\n"
+                "ORDER BY changed_at",
+                "SELECT date, category, orders\n"
+                "FROM category_daily_revenue\n"
+                "WHERE date BETWEEN '2026-03-23' AND '2026-03-24'\n"
+                "ORDER BY date, category",
+            ],
         ),
         ValidationResult(
             hypothesis="결제 성공률 하락으로 인한 주문 전환 실패 증가",
@@ -765,6 +908,12 @@ def _demo_orders() -> AnomalyAnalysis:
                 "결제 게이트웨이 장애와 무관함을 보여준다. 결제 성공률이 상승한 "
                 "사실이 해당 가설을 정면으로 반박한다."
             ),
+            queries_run=[
+                "SELECT date, payment_success_rate, conversion, visitors\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-22' AND '2026-03-26'\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="프로모션/할인 캠페인 종료로 구매 유인 소멸",
@@ -775,6 +924,12 @@ def _demo_orders() -> AnomalyAnalysis:
                 "완전히 동일하게 유지됐다. 하락이 kitchen 단일 카테고리에만 "
                 "국한되어 있어 가격 매력도 소멸 가설과 부합하지 않는다."
             ),
+            queries_run=[
+                "SELECT date, category, orders\n"
+                "FROM category_daily_revenue\n"
+                "WHERE date BETWEEN '2026-03-23' AND '2026-03-25'\n"
+                "ORDER BY date, category",
+            ],
         ),
         ValidationResult(
             hypothesis="체크아웃 UI/UX 변경(빌드 배포)으로 전환 퍼널 이탈 증가",
@@ -785,6 +940,15 @@ def _demo_orders() -> AnomalyAnalysis:
                 "125건으로 동일하며 영향이 전혀 없다. 하락이 kitchen 카테고리에만 "
                 "집중된 구조는 UI 변경이 아닌 상품 가용성 문제를 가리킨다."
             ),
+            queries_run=[
+                "SELECT category,\n"
+                "       SUM(CASE WHEN date='2026-03-23' THEN orders ELSE 0 END) AS orders_03_23,\n"
+                "       SUM(CASE WHEN date='2026-03-24' THEN orders ELSE 0 END) AS orders_03_24\n"
+                "FROM category_daily_revenue\n"
+                "WHERE date IN ('2026-03-23', '2026-03-24')\n"
+                "GROUP BY category\n"
+                "ORDER BY category",
+            ],
         ),
     ]
     root_cause = RootCauseReport(
@@ -957,6 +1121,15 @@ def _demo_gmv_ecommerce() -> AnomalyAnalysis:
                 "일치한다. 나머지 3개 카테고리(beauty·electronics·fashion)는 "
                 "동일 기간 변화가 없어 품절이 단일 원인임을 강하게 지지한다."
             ),
+            queries_run=[
+                "SELECT product_id, name, category, inventory_status\n"
+                "FROM products\n"
+                "WHERE product_id = 'p_kitchen_01'",
+                "SELECT date, category, gmv, orders\n"
+                "FROM category_daily_revenue\n"
+                "WHERE date BETWEEN '2026-03-23' AND '2026-03-24'\n"
+                "ORDER BY date, category",
+            ],
         ),
         ValidationResult(
             hypothesis="주요 프로모션/할인 캠페인 종료로 인한 전체 주문 수 급감",
@@ -969,6 +1142,15 @@ def _demo_gmv_ecommerce() -> AnomalyAnalysis:
                 "3,998원 → 4,004원으로 거의 변동이 없어 할인 종료에 따른 단가 "
                 "상승 효과도 확인되지 않는다."
             ),
+            queries_run=[
+                "SELECT DATE(paid_at) AS date,\n"
+                "       AVG(amount) AS avg_order_value,\n"
+                "       COUNT(*) AS orders\n"
+                "FROM orders\n"
+                "WHERE DATE(paid_at) BETWEEN '2026-03-23' AND '2026-03-24'\n"
+                "GROUP BY DATE(paid_at)\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="외부 트래픽(마케팅 채널/광고) 유입 감소로 방문자 수 자체가 줄어 주문 감소",
@@ -980,6 +1162,12 @@ def _demo_gmv_ecommerce() -> AnomalyAnalysis:
                 "이를 전혀 확인할 수 없다. 전환율 하락(3.37% → 2.96%)은 트래픽 "
                 "감소가 아닌 구매 가능 상품 축소에 기인한 것으로 판단된다."
             ),
+            queries_run=[
+                "SELECT date, visitors, conversion\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-22' AND '2026-03-26'\n"
+                "ORDER BY date",
+            ],
         ),
         ValidationResult(
             hypothesis="결제 성공률 하락 또는 결제 시스템 부분 장애로 완결 주문 감소",
@@ -992,6 +1180,12 @@ def _demo_gmv_ecommerce() -> AnomalyAnalysis:
                 "기기의 상대적 큰 하락(-16.6%) 역시 결제 모듈 장애가 아닌 상품 "
                 "부재로 설명된다."
             ),
+            queries_run=[
+                "SELECT date, payment_success_rate\n"
+                "FROM daily_kpi\n"
+                "WHERE date BETWEEN '2026-03-22' AND '2026-03-26'\n"
+                "ORDER BY date",
+            ],
         ),
     ]
     root_cause = RootCauseReport(
