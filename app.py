@@ -288,6 +288,12 @@ def page_start() -> None:
             min-height: 52px !important;
             font-size: 15px !important;
         }
+        /* 가상 데이터 보기 expander 헤더 — 업종 selectbox 세로 높이 (48px) 와 통일 */
+        div[data-testid='stExpander'] details > summary {
+            min-height: 48px !important;
+            display: flex !important;
+            align-items: center !important;
+        }
     </style>""", unsafe_allow_html=True)
 
     # 분석 기간
