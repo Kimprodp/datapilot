@@ -48,6 +48,21 @@ class TestResetSetIntegrity:
             f"RESET_ON_DOMAIN_CHANGE 에 분석 결과 key 누락: {missing}"
         )
 
+    def test_contains_viewer_keys(self):
+        """mock-data-viewer 의 도메인 의존 키 (테이블 / 페이지) 가 RESET 에 포함."""
+        required = {"viewer_selected_table", "viewer_selected_table_page"}
+        missing = required - app_module.RESET_ON_DOMAIN_CHANGE
+        assert not missing, (
+            f"RESET_ON_DOMAIN_CHANGE 에 viewer 키 누락: {missing}"
+        )
+
+    def test_does_not_contain_viewer_open(self):
+        """viewer_open 은 UX 일관 위해 RESET 미포함 — 도메인 전환 시 펼침 보존."""
+        assert "viewer_open" not in app_module.RESET_ON_DOMAIN_CHANGE, (
+            "viewer_open 이 RESET 에 들어가면 도메인 전환 시 viewer 가 매번 닫힘 "
+            "(UX 일관 정책 위반)"
+        )
+
 
 # ════════════════════════════════════════════════════════════════════
 # 2. _on_domain_change 동작

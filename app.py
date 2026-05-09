@@ -24,6 +24,7 @@ from datapilot.pipeline import (
     UnanalyzedAnomaly,
 )
 from datapilot.repository import make_repository
+from datapilot.viewer import render_mock_data_viewer
 
 
 # ------------------------------------------------------------------
@@ -49,6 +50,8 @@ _PERIOD_OPTIONS = {
 RESET_ON_DOMAIN_CHANGE: frozenset[str] = frozenset({
     "report",
     "selected_anomaly_idx",
+    "viewer_selected_table",        # mock-data-viewer: 도메인 간 의미 잃음
+    "viewer_selected_table_page",   # mock-data-viewer: 도메인 전환 시 페이지 1 로
 })
 
 
@@ -58,9 +61,17 @@ def _on_domain_change() -> None:
     이전 도메인의 분석 결과 / 선택 상태를 비워 화면이 새 도메인 기준으로 자연
     렌더되도록 한다. ``make_repository`` 의 ``@st.cache_resource`` 도 도메인이
     바뀌면 별도 인스턴스가 생성되므로 별도 invalidate 불필요.
+
+    ``viewer_open`` 은 RESET 미포함 — 도메인 전환 시에도 펼침 상태 보존
+    (viewer 영역에서 새 도메인 데이터로 즉시 비교 가능).
     """
     for k in RESET_ON_DOMAIN_CHANGE:
         st.session_state.pop(k, None)
+
+
+def _toggle_viewer() -> None:
+    """가상 데이터 보기 버튼 on_click — viewer_open 토글."""
+    st.session_state.viewer_open = not st.session_state.get("viewer_open", False)
 
 _SEVERITY_COLORS = {
     "HIGH": ("#fce4e4", "#c0392b"),
@@ -245,6 +256,22 @@ def page_start() -> None:
         label_visibility="collapsed",
     )
     domain = st.session_state.domain
+
+    # 가상 데이터 보기 — selectbox 하단 토글 버튼 + viewer 노출 영역
+    _viewer_open = st.session_state.get("viewer_open", False)
+    st.button(
+        "📊 가상 데이터 닫기" if _viewer_open else "📊 가상 데이터 보기",
+        on_click=_toggle_viewer,
+        use_container_width=True,
+        help="이 데모에 사용된 mock 데이터의 테이블 / 컬럼 / 실제 row 를 확인할 수 있어요.",
+    )
+    if _viewer_open:
+        try:
+            with make_repository(domain) as _viewer_repo:
+                render_mock_data_viewer(domain, _viewer_repo)
+        except Exception as _viewer_err:  # noqa: BLE001 — graceful skip 의도
+            print(f"[viewer] graceful skip: {_viewer_err}", file=sys.stderr)
+            st.warning("가상 데이터를 불러오는 중 오류가 발생했어요.")
 
     # 화면1 공통 CSS
     st.markdown("""<style>
