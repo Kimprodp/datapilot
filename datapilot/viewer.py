@@ -5,10 +5,10 @@
 
 진입: ``app.py`` 의 page_start 에서 ``render_mock_data_viewer(domain, repo)`` 호출.
 
+UI 토글 = ``st.expander`` 자체의 펼침/접힘. 외부 토글 버튼 / ``viewer_open``
+session_state 키 불필요 (button + expander 헤더 중복 제거).
+
 session_state 키:
-    viewer_open: bool
-        "가상 데이터 보기" 버튼 토글. UX 일관 위해 ``RESET_ON_DOMAIN_CHANGE``
-        에는 미포함 — 도메인 전환 시에도 펼침/접힘 상태 보존.
     viewer_selected_table: str | None
         F2 라디오 선택 테이블. RESET 포함 — 도메인 간 의미 잃음.
     viewer_selected_table_page: int
@@ -34,22 +34,16 @@ PAGE_SIZE = 50
 
 
 def render_mock_data_viewer(domain: str, repo: DuckDBAdapter) -> None:
-    """page_start 진입점. ``viewer_open`` 가 True 일 때만 expander 펼침.
+    """page_start 진입점. ``st.expander`` 자체가 토글 — 외부 버튼/키 불필요.
 
     Args:
         domain: 현재 선택된 도메인 식별자 (``DOMAINS`` 키).
-        repo: ``@st.cache_resource`` 로 캐시된 DuckDBAdapter 인스턴스.
+        repo: ``DuckDBAdapter`` 인스턴스.
     """
-    if not st.session_state.get("viewer_open", False):
-        return
-
-    cfg = DOMAINS[domain]
-    industry = cfg.ui_labels.industry_name
-
-    with st.expander(f"📊 {industry} 가상 데이터 보기", expanded=True):
+    with st.expander("📊 가상 데이터 보기", expanded=False):
         st.caption(
-            "데모에 사용된 mock 데이터입니다. AI 분석은 이 테이블들의 raw 데이터에서 "
-            "추론합니다. 테이블을 선택하면 컬럼 의미와 실제 row 를 볼 수 있어요."
+            "이 데모에 사용된 가상 데이터입니다. AI 분석은 이 테이블들의 데이터에서 "
+            "추론합니다. 각 테이블별 데이터를 확인할 수 있어요."
         )
 
         selected = _render_f2_table_list(domain, repo)
@@ -76,12 +70,14 @@ def _render_f2_table_list(domain: str, repo: DuckDBAdapter) -> str | None:
         desc = descriptions.get(name, "")
         return f"{name} — {desc}" if desc else name
 
+    _viewer_section_label("테이블 선택")
     return st.radio(
         "테이블 선택",
         table_names,
         format_func=_label,
         key="viewer_selected_table",
         on_change=_on_table_change,
+        label_visibility="collapsed",
     )
 
 
@@ -114,6 +110,10 @@ def _render_f3_table_detail(
             if desc:
                 column_config[col] = st.column_config.Column(help=desc)
 
+    _viewer_section_label(
+        "가상 데이터",
+        caption="컬럼명에 마우스를 올리시면 컬럼별 설명을 볼 수 있어요.",
+    )
     st.dataframe(rows, column_config=column_config, hide_index=True)
     st.number_input(
         f"페이지 (총 {page_count} 페이지 / {total:,} 행)",
@@ -143,3 +143,23 @@ def _filter_to_allowed_tables(
 def _on_table_change() -> None:
     """``st.radio`` on_change 콜백 — 테이블 변경 시 페이지를 1 로 리셋."""
     st.session_state["viewer_selected_table_page"] = 1
+
+
+def _viewer_section_label(text: str, *, caption: str | None = None) -> None:
+    """viewer 안 섹션 라벨 — selectbox/radio 기본 라벨 (14px / bold) 통일.
+
+    ``caption`` 을 주면 라벨 옆 같은 줄에 작은 회색 글씨로 부연 설명 노출
+    (``st.caption`` 톤). 별도 줄로 차지하지 않게 inline-flex.
+    """
+    if caption:
+        html = (
+            "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:4px;'>"
+            f"<span style='font-size:14px;font-weight:600;'>{text}</span>"
+            f"<span style='font-size:13px;color:#5f6368;'>{caption}</span>"
+            "</div>"
+        )
+    else:
+        html = (
+            f"<div style='font-size:14px;font-weight:600;margin-bottom:4px;'>{text}</div>"
+        )
+    st.markdown(html, unsafe_allow_html=True)

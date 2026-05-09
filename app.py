@@ -68,11 +68,6 @@ def _on_domain_change() -> None:
     for k in RESET_ON_DOMAIN_CHANGE:
         st.session_state.pop(k, None)
 
-
-def _toggle_viewer() -> None:
-    """가상 데이터 보기 버튼 on_click — viewer_open 토글."""
-    st.session_state.viewer_open = not st.session_state.get("viewer_open", False)
-
 _SEVERITY_COLORS = {
     "HIGH": ("#fce4e4", "#c0392b"),
     "MEDIUM": ("#fef3cd", "#856404"),
@@ -257,21 +252,13 @@ def page_start() -> None:
     )
     domain = st.session_state.domain
 
-    # 가상 데이터 보기 — selectbox 하단 토글 버튼 + viewer 노출 영역
-    _viewer_open = st.session_state.get("viewer_open", False)
-    st.button(
-        "📊 가상 데이터 닫기" if _viewer_open else "📊 가상 데이터 보기",
-        on_click=_toggle_viewer,
-        use_container_width=True,
-        help="이 데모에 사용된 mock 데이터의 테이블 / 컬럼 / 실제 row 를 확인할 수 있어요.",
-    )
-    if _viewer_open:
-        try:
-            with make_repository(domain) as _viewer_repo:
-                render_mock_data_viewer(domain, _viewer_repo)
-        except Exception as _viewer_err:  # noqa: BLE001 — graceful skip 의도
-            print(f"[viewer] graceful skip: {_viewer_err}", file=sys.stderr)
-            st.warning("가상 데이터를 불러오는 중 오류가 발생했어요.")
+    # 가상 데이터 viewer (expander 자체가 토글 — 외부 버튼 불필요)
+    try:
+        with make_repository(domain) as _viewer_repo:
+            render_mock_data_viewer(domain, _viewer_repo)
+    except Exception as _viewer_err:  # noqa: BLE001 — graceful skip 의도
+        print(f"[viewer] graceful skip: {_viewer_err}", file=sys.stderr)
+        st.warning("가상 데이터를 불러오는 중 오류가 발생했어요.")
 
     # 화면1 공통 CSS
     st.markdown("""<style>
