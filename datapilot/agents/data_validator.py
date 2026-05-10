@@ -128,6 +128,24 @@ def classify(
 # ──────────────────────────────────────────────────────────────────
 
 
+#: SQL 시작 부분의 주석 / 공백 제거용. SELECT 매칭 전에 noise 를 떨어내야
+#: LLM 이 가독성 위해 ``-- 가설 N: ...`` 같은 주석을 앞에 달아도 차단되지 않는다.
+_LEADING_SQL_NOISE = re.compile(
+    r"\A(?:\s+|--[^\n]*\n?|/\*.*?\*/)+",
+    re.DOTALL,
+)
+
+
+def _strip_leading_noise(sql: str) -> str:
+    """SQL 시작의 한 줄 주석 (``--``) / 블록 주석 (``/* */``) / 공백을 모두 떨어낸다."""
+    prev = None
+    cleaned = sql
+    while cleaned != prev:
+        prev = cleaned
+        cleaned = _LEADING_SQL_NOISE.sub("", cleaned)
+    return cleaned
+
+
 def _extract_table_names(sql: str) -> set[str]:
     """SQL에서 FROM/JOIN 뒤에 오는 테이블명을 추출한다.
 
@@ -291,9 +309,12 @@ class DataValidator:
             결과는 JSON 문자열로 반환된다.
             SELECT가 아니거나 허용되지 않은 테이블 접근 시 에러를 반환한다.
             """
-            # 1) SELECT only
-            stripped = query.strip()
-            if not re.match(r"^SELECT\s", stripped, re.IGNORECASE):
+            # 1) SELECT only — leading 주석/공백 떨어낸 후 SELECT 또는 WITH 매칭.
+            #    LLM 이 가독성 위해 `-- 가설 N: ...` 주석을 앞에 달아도 통과해야 함.
+            #    CTE (`WITH ... SELECT ...`) 도 표준 SELECT 의 한 형태로 허용.
+            #    DML/DDL (UPDATE/DROP 등) 은 다음 단계 _DANGEROUS_PATTERN 이 별도 차단.
+            stripped = _strip_leading_noise(query)
+            if not re.match(r"^(SELECT|WITH)\s", stripped, re.IGNORECASE):
                 return json.dumps(
                     {"error": "SELECT 쿼리만 허용됩니다"},
                     ensure_ascii=False,

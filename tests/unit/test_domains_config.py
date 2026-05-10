@@ -1,21 +1,27 @@
 """도메인 패키지 (datapilot/domain/) 정합성 단위 테스트.
 
-검증 범위 (1차 — 본 task):
+검증 범위 (1차):
 - DOMAINS dict 의 모든 항목이 DomainConfig 의 필드를 채움
 - name 이 dict key 와 일치
 - 각 필드의 타입/모양 (frozenset / dict / tuple / dataclass)
 - DomainKeywords / UILabels 의 필수 항목 누락 없음
 
-검증 범위 (2차 — DB 파일 분리 task 이후 별도 테스트):
-- allowed_tables ⊆ 실제 DuckDB 의 테이블 목록 (실제 conn 필요)
+검증 범위 (2차 — mock-data-viewer 신규 필드, 실 mock DB conn 사용):
+- viewer_table_descriptions 키 == allowed_tables (양방향, 누락 + 잉여 모두 fail)
+- column_descriptions 의 (table, column) 키 == 실 mock DB 의 INFORMATION_SCHEMA 컬럼
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import duckdb
 import pytest
 
 from datapilot.domain import DOMAINS, ECOMMERCE, GAME, DomainConfig
 from datapilot.domain.base import DomainKeywords, UILabels
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -232,3 +238,81 @@ class TestEcommerceDomain:
             f"이커머스 시나리오 검증에 필수 테이블 누락: "
             f"{required - ECOMMERCE.allowed_tables}"
         )
+
+
+# ════════════════════════════════════════════════════════════════════
+# 7. mock-data-viewer 신규 필드 양방향 키 검증
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestViewerTableDescriptions:
+    """viewer_table_descriptions: 비개발자 톤 테이블 1줄 설명 SoT."""
+
+    def test_keys_equal_allowed_tables(self, domain):
+        """누락 + 잉여 모두 fail (allowed_tables == viewer_table_descriptions 키)."""
+        name, cfg = domain
+        viewer_keys = set(cfg.viewer_table_descriptions.keys())
+        allowed = set(cfg.allowed_tables)
+        missing = allowed - viewer_keys
+        extra = viewer_keys - allowed
+        assert not missing, (
+            f"{name}: viewer_table_descriptions 누락 테이블: {missing}"
+        )
+        assert not extra, (
+            f"{name}: viewer_table_descriptions 에 allowed_tables 외 키: {extra}"
+        )
+
+    def test_values_non_empty(self, domain):
+        name, cfg = domain
+        for table, desc in cfg.viewer_table_descriptions.items():
+            assert desc.strip(), (
+                f"{name}: viewer_table_descriptions[{table!r}] 가 빈 문자열"
+            )
+
+
+class TestColumnDescriptionsMatchMockDB:
+    """column_descriptions: 실 mock DB 의 INFORMATION_SCHEMA 와 양방향 비교.
+
+    누락 (DB 에 있는데 설명 없음) + 잉여 (설명 있는데 DB 에 없음) 모두 fail.
+    F3 컬럼 툴팁이 빈 칸으로 노출되는 회귀와 컬럼명 오타로 인한 영구 미노출 둘 다 차단.
+    """
+
+    def test_keys_equal_mock_db_schema(self, domain):
+        name, cfg = domain
+        db_path = _PROJECT_ROOT / cfg.db_path
+        if not db_path.exists():
+            pytest.skip(f"{name}: mock DB 파일 부재 ({db_path})")
+
+        with duckdb.connect(str(db_path), read_only=True) as conn:
+            rows = conn.execute(
+                """
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'main'
+                """
+            ).fetchall()
+
+        actual: dict[str, set[str]] = {}
+        for table_name, column_name in rows:
+            actual.setdefault(table_name, set()).add(column_name)
+
+        # allowed_tables 안의 테이블만 비교 (mock DB 가 화이트리스트보다 많을 가능성 방어)
+        for table in cfg.allowed_tables:
+            actual_cols = actual.get(table, set())
+            described_cols = set(cfg.column_descriptions.get(table, {}).keys())
+            missing = actual_cols - described_cols
+            extra = described_cols - actual_cols
+            assert not missing, (
+                f"{name}: column_descriptions[{table!r}] 누락 컬럼: {missing}"
+            )
+            assert not extra, (
+                f"{name}: column_descriptions[{table!r}] 에 mock DB 외 컬럼: {extra}"
+            )
+
+    def test_values_non_empty(self, domain):
+        name, cfg = domain
+        for table, cols in cfg.column_descriptions.items():
+            for col, desc in cols.items():
+                assert desc.strip(), (
+                    f"{name}: column_descriptions[{table!r}][{col!r}] 가 빈 문자열"
+                )

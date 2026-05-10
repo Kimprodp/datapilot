@@ -377,7 +377,9 @@ def seed_shop_impressions(conn: duckdb.DuckDBPyConnection):
                 is_premium = product_id in PREMIUM_PRODUCTS
 
                 if is_after_change and platform == "android" and is_premium:
-                    slot = random.randint(4, 6)     # UI 변경 후: 중하단으로 밀림
+                    # UI 변경 후: 하단으로 깊이 밀림 (scroll_depth 3~8 안에 거의 안 들어옴)
+                    # 매출 영향 -9% → -18% 수준으로 강화 (① BottleneckDetector 가 noise 안 분류)
+                    slot = random.randint(7, 10)
                 elif is_premium:
                     slot = random.randint(1, 3)     # 정상: 상단
                 else:

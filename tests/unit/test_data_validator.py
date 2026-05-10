@@ -291,6 +291,78 @@ class TestExecuteSqlSecurity:
         )
         assert "error" in result
 
+    # ── 보안 레이어 1-b: leading 주석 / 공백 처리 (라운드 폭증 방지) ──
+
+    def _assert_select_only_passed(self, result) -> None:
+        """SELECT only 보안 레이어 통과 검증 (다음 레이어 결과는 무관).
+
+        성공 시 list (row 결과) 반환, 차단 시 dict + error.
+        """
+        if isinstance(result, dict):
+            assert result.get("error") != "SELECT 쿼리만 허용됩니다", (
+                "SELECT only 보안 레이어가 leading 주석/공백을 차단함 — "
+                "라운드 폭증 회귀"
+            )
+
+    def test_allows_select_with_leading_line_comment(self, validator):
+        """LLM 이 가독성 위해 ``-- 주석``으로 시작해도 SELECT 통과."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator, "-- 가설 1: 결제 추이 조회\nSELECT * FROM payments LIMIT 1"
+        )
+        self._assert_select_only_passed(result)
+
+    def test_allows_select_with_leading_block_comment(self, validator):
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator, "/* 가설 1 */ SELECT * FROM payments LIMIT 1"
+        )
+        self._assert_select_only_passed(result)
+
+    def test_allows_select_with_multiple_leading_comments_and_spaces(self, validator):
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator,
+            "  -- 1번\n  -- 2번\n  /* 3번 */\nSELECT * FROM payments LIMIT 1",
+        )
+        self._assert_select_only_passed(result)
+
+    def test_blocks_update_disguised_with_leading_comment(self, validator):
+        """주석 통과 허용이 위장 공격 (UPDATE/DELETE) 의 우회로가 되지 않음."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator, "-- 합법처럼 보이는 주석\nUPDATE payments SET amount=0"
+        )
+        assert result["error"] == "SELECT 쿼리만 허용됩니다"
+
+    def test_blocks_drop_disguised_with_block_comment(self, validator):
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator, "/* leading */ DROP TABLE payments"
+        )
+        # SELECT 매칭 실패 (UPDATE/DROP) → SELECT only 에러
+        assert result["error"] == "SELECT 쿼리만 허용됩니다"
+
+    def test_allows_cte_with_starting_query(self, validator):
+        """``WITH ... SELECT ...`` (CTE) 는 표준 SELECT 의 한 형태 → 허용."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator,
+            "WITH recent AS (SELECT * FROM payments LIMIT 5) "
+            "SELECT * FROM recent",
+        )
+        self._assert_select_only_passed(result)
+
+    def test_allows_cte_with_leading_comment(self, validator):
+        """주석 + CTE 조합도 통과."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator,
+            "-- 가설 1: CTE 로 임시 결과 만들기\n"
+            "WITH x AS (SELECT * FROM payments LIMIT 1) SELECT * FROM x",
+        )
+        self._assert_select_only_passed(result)
+
     # ── 보안 레이어 2: 위험 키워드 블랙리스트 ──────────────────
 
     def test_blocks_drop_keyword_in_query(self, validator):

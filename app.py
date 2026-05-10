@@ -24,6 +24,7 @@ from datapilot.pipeline import (
     UnanalyzedAnomaly,
 )
 from datapilot.repository import make_repository
+from datapilot.viewer import render_mock_data_viewer
 
 
 # ------------------------------------------------------------------
@@ -49,6 +50,8 @@ _PERIOD_OPTIONS = {
 RESET_ON_DOMAIN_CHANGE: frozenset[str] = frozenset({
     "report",
     "selected_anomaly_idx",
+    "viewer_selected_table",        # mock-data-viewer: 도메인 간 의미 잃음
+    "viewer_selected_table_page",   # mock-data-viewer: 도메인 전환 시 페이지 1 로
 })
 
 
@@ -58,6 +61,9 @@ def _on_domain_change() -> None:
     이전 도메인의 분석 결과 / 선택 상태를 비워 화면이 새 도메인 기준으로 자연
     렌더되도록 한다. ``make_repository`` 의 ``@st.cache_resource`` 도 도메인이
     바뀌면 별도 인스턴스가 생성되므로 별도 invalidate 불필요.
+
+    ``viewer_open`` 은 RESET 미포함 — 도메인 전환 시에도 펼침 상태 보존
+    (viewer 영역에서 새 도메인 데이터로 즉시 비교 가능).
     """
     for k in RESET_ON_DOMAIN_CHANGE:
         st.session_state.pop(k, None)
@@ -152,7 +158,7 @@ def _app_header() -> None:
         f"실제 운영 환경에서는 연동된 DB의 선택 기간 데이터를 분석해 리포트를 제공합니다.</div>"
         f"<div style='{base_style}margin-top:4px;'>"
         f"데모 버전은 가상 데이터로 구성된 DB를 사용해 동작하며, "
-        f"현재 게임·이커머스 두 업종을 체험할 수 있습니다.</div>"
+        f"현재 이커머스·게임 두 업종을 체험할 수 있습니다.</div>"
         f"<div style='{note_style}margin-top:10px;'>"
         f"분석에는 약 3~6분이 소요됩니다.</div>"
         "<hr style='margin:12px 0 18px 0;border:none;border-top:1px solid #eee;'>",
@@ -235,7 +241,7 @@ def page_start() -> None:
     )
     domain_keys = list(DOMAINS.keys())  # ["game", "ecommerce"]
     if "domain" not in st.session_state:
-        st.session_state.domain = "game"
+        st.session_state.domain = "ecommerce"
     st.selectbox(
         "업종 선택",
         domain_keys,
@@ -245,6 +251,17 @@ def page_start() -> None:
         label_visibility="collapsed",
     )
     domain = st.session_state.domain
+    # selectbox widget 이 page 이동 시 cleanup 되어도 도메인 살리도록 별도 키에 보존.
+    # page_complete 의 가설 카드 SQL 트레이싱이 이 키로 도메인 식별.
+    st.session_state.active_domain = domain
+
+    # 가상 데이터 viewer (expander 자체가 토글 — 외부 버튼 불필요)
+    try:
+        with make_repository(domain) as _viewer_repo:
+            render_mock_data_viewer(domain, _viewer_repo)
+    except Exception as _viewer_err:  # noqa: BLE001 — graceful skip 의도
+        print(f"[viewer] graceful skip: {_viewer_err}", file=sys.stderr)
+        st.warning("가상 데이터를 불러오는 중 오류가 발생했어요.")
 
     # 화면1 공통 CSS
     st.markdown("""<style>
@@ -273,6 +290,12 @@ def page_start() -> None:
         button[data-testid='stBaseButton-secondary'] {
             min-height: 52px !important;
             font-size: 15px !important;
+        }
+        /* 가상 데이터 보기 expander 헤더 — 업종 selectbox 세로 높이 (48px) 와 통일 */
+        div[data-testid='stExpander'] details > summary {
+            min-height: 48px !important;
+            display: flex !important;
+            align-items: center !important;
         }
     </style>""", unsafe_allow_html=True)
 
@@ -826,33 +849,76 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
 
 
 def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
-    """카드 3: 가설과 검증 (③+④)."""
+    """카드 3: 가설과 검증 (③+④).
+
+    ④ DataValidator 가 batch validation 으로 anomaly 의 모든 가설을 한 번에
+    검증 (모든 ValidationResult.queries_run 이 동일). 따라서 SQL 트레이싱
+    expander 는 카드 상단에 한 번만 노출.
+    """
     with st.container(border=True):
         st.markdown(_card_header("가설과 검증", "③ 가설 생성 + ④ 데이터 검증"), unsafe_allow_html=True)
         sorted_results = sorted(
             analysis.validation_results,
             key=lambda vr: _VALIDATION_SORT.get(vr.status, 3),
         )
-        for vi, vr in enumerate(sorted_results):
-            vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
-            badge = _badge_html(vr_label, bg, fg)
-            ev_color = "#555" if vr.status == "supported" else "#888"
-            ev_raw = vr.evidence or vr.required_data or ""
-            # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
-            ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
-            is_last = vi == len(sorted_results) - 1
-            border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
-            st.markdown(
-                f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
-                f"{border}'>"
-                f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
-                f"<div>"
-                f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
-                f"<div style='font-size:13px;color:{ev_color};margin-top:4px;line-height:1.5;'>{ev_text}</div>"
-                f"</div></div>",
-                unsafe_allow_html=True,
+        # active_domain 우선 — page_complete 에서 selectbox 사라져도 도메인 식별 유지.
+        domain = st.session_state.get("active_domain") or st.session_state.get("domain", "game")
+        with make_repository(domain) as repo:
+            # batch validation — 모든 가설이 동일한 queries_run 보유.
+            # 첫 번째로 SQL 가진 가설의 묶음을 카드 상단에 한 번만 노출.
+            trace_vr = next(
+                (v for v in sorted_results if v.queries_run),
+                None,
             )
+            if trace_vr is not None:
+                _render_validation_sql_trace(trace_vr, repo)
+            for vi, vr in enumerate(sorted_results):
+                vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
+                badge = _badge_html(vr_label, bg, fg)
+                ev_color = "#555" if vr.status == "supported" else "#888"
+                ev_raw = vr.evidence or vr.required_data or ""
+                # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
+                ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
+                is_last = vi == len(sorted_results) - 1
+                border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
+                st.markdown(
+                    f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
+                    f"{border}'>"
+                    f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
+                    f"<div>"
+                    f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
+                    f"<div style='font-size:13px;color:{ev_color};margin-top:4px;line-height:1.5;'>{ev_text}</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+
+def _render_validation_sql_trace(vr, repo) -> None:
+    """가설 검증에 사용된 SQL 을 **실 mock DB 에서 동적 실행해** 결과 노출.
+
+    평가자가 "AI 가 어떤 데이터로 이 가설을 판정했는지" 직접 확인 가능.
+    데모 / 라이브 모드 모두 결과는 실 mock 에서 가져옴 — 픽션 0.
+
+    SQL 0 개면 expander 생략 (검증 실패 / unverified 의 일부).
+    """
+    if not vr.queries_run:
+        return
+    n = len(vr.queries_run)
+    with st.expander(f"검증에 사용한 SQL 및 결과 ({n}개) 보기", expanded=False):
+        for qi, query in enumerate(vr.queries_run):
+            st.code(query, language="sql")
+            try:
+                rows = repo.execute_readonly_sql(query, max_rows=100)
+            except Exception as exc:  # noqa: BLE001 — graceful 노출
+                st.caption(f"SQL 실행 실패: {exc}")
+            else:
+                if rows:
+                    st.dataframe(rows, hide_index=True)
+                else:
+                    st.caption("결과 없음 (빈 결과)")
+            if qi < n - 1:
+                st.divider()
 
 
 def _render_root_cause_card(analysis: AnomalyAnalysis) -> None:
