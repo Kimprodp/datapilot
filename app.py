@@ -158,7 +158,7 @@ def _app_header() -> None:
         f"실제 운영 환경에서는 연동된 DB의 선택 기간 데이터를 분석해 리포트를 제공합니다.</div>"
         f"<div style='{base_style}margin-top:4px;'>"
         f"데모 버전은 가상 데이터로 구성된 DB를 사용해 동작하며, "
-        f"현재 게임·이커머스 두 업종을 체험할 수 있습니다.</div>"
+        f"현재 이커머스·게임 두 업종을 체험할 수 있습니다.</div>"
         f"<div style='{note_style}margin-top:10px;'>"
         f"분석에는 약 3~6분이 소요됩니다.</div>"
         "<hr style='margin:12px 0 18px 0;border:none;border-top:1px solid #eee;'>",
@@ -241,7 +241,7 @@ def page_start() -> None:
     )
     domain_keys = list(DOMAINS.keys())  # ["game", "ecommerce"]
     if "domain" not in st.session_state:
-        st.session_state.domain = "game"
+        st.session_state.domain = "ecommerce"
     st.selectbox(
         "업종 선택",
         domain_keys,
