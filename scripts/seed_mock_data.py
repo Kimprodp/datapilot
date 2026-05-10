@@ -712,7 +712,7 @@ ECOMMERCE_PERIOD_DAYS = 30
 ECOMMERCE_START = ECOMMERCE_BASE_DATE - timedelta(days=ECOMMERCE_PERIOD_DAYS - 1)
 NUM_CUSTOMERS = 1000
 
-#: 시나리오 B (재고 부족) — D-7 부터 kitchen 카테고리 인기 상품 품절
+#: 재고 부족 시나리오 — D-7 부터 kitchen 카테고리 인기 상품 품절
 INVENTORY_OUT_DATE = ECOMMERCE_BASE_DATE - timedelta(days=7)  # 2026-03-24
 TOP_KITCHEN_PRODUCT = "p_kitchen_01"
 
@@ -828,7 +828,7 @@ def seed_ecommerce_products(conn: duckdb.DuckDBPyConnection):
     for category in ECOMMERCE_CATEGORIES:
         for i in range(1, PRODUCTS_PER_CATEGORY + 1):
             pid = f"p_{category}_{i:02d}"
-            # 시나리오 B: kitchen 카테고리 인기 상품 (p_kitchen_01) 만 품절
+            # 재고 부족 시나리오: kitchen 카테고리 인기 상품 (p_kitchen_01) 만 품절
             inventory = (
                 "out_of_stock" if pid == TOP_KITCHEN_PRODUCT else "in_stock"
             )
@@ -843,13 +843,11 @@ def seed_ecommerce_products(conn: duckdb.DuckDBPyConnection):
 
 
 def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
-    """30 일치 일별 주문. 시나리오 B/C 시점에 변동.
+    """30 일치 일별 주문. 재고 부족 시나리오 시점 (D-7) 에 변동.
 
     - 평소: 일평균 ~500 건. 카테고리 균등 분포 (각 25%, 약 125 건/일/카테고리).
     - D-7 부터: kitchen 카테고리에서 p_kitchen_01 (해당 카테고리의 인기 1위) 50%
       차지하던 주문이 0 건 → kitchen 일별 주문 ~50% 감소 → 전체 ~12.5% 감소
-    - D-3 부터: spring_sale 종료. 평균 객단가 약 -20% (할인 적용 종료) →
-      gmv 약 -20% (orders 수는 영향 X — 객단가만 낮아짐)
     """
     rows = []
     customer_ids = [f"c_{i:04d}" for i in range(NUM_CUSTOMERS)]
@@ -866,7 +864,7 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
         d = ECOMMERCE_START + timedelta(days=day_offset)
         # 평소 일별 약 500 건
         base_count = 500
-        # 시나리오 B: D-7 부터 kitchen 주문 약 50% ↓
+        # 재고 부족 시나리오: D-7 부터 kitchen 주문 약 50% ↓
         kitchen_after_outage = d >= INVENTORY_OUT_DATE
 
         for category in ECOMMERCE_CATEGORIES:
@@ -886,7 +884,7 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
                 else:
                     pid = random.choice(pids)
 
-                # 일정 가격 분포 (시나리오 B 만 매립 — 카테고리별 주문수 변동만)
+                # 일정 가격 분포 (재고 부족 시나리오만 매립 — 카테고리별 주문수 변동만)
                 amount = random.uniform(3000, 5000)
 
                 rows.append((
@@ -910,11 +908,11 @@ def seed_ecommerce_orders(conn: duckdb.DuckDBPyConnection):
 
 
 def seed_ecommerce_inventory_changes(conn: duckdb.DuckDBPyConnection):
-    """시점별 재고 변경 이력. 시나리오 B 의 핵심 시점 신호.
+    """시점별 재고 변경 이력. 재고 부족 시나리오의 핵심 시점 신호.
 
     초기 상태 (D-30 시점) 모든 상품 in_stock 등록 + p_kitchen_01 의 D-7 시점
     out_of_stock 변경 기록. ④ Validator 가 ``WHERE changed_at >= ?`` 시점별
-    SQL 로 시나리오 B 의 결정적 증거 잡을 수 있게 함.
+    SQL 로 재고 부족의 결정적 증거 잡을 수 있게 함.
     """
     rows = []
     seq = 0
@@ -932,7 +930,7 @@ def seed_ecommerce_inventory_changes(conn: duckdb.DuckDBPyConnection):
             ))
             seq += 1
 
-    # 시나리오 B 핵심: D-7 (2026-03-24) 에 p_kitchen_01 out_of_stock 전환
+    # 재고 부족 시나리오 핵심: D-7 (2026-03-24) 에 p_kitchen_01 out_of_stock 전환
     rows.append((
         f"ic_{seq:05d}",
         TOP_KITCHEN_PRODUCT,
@@ -975,8 +973,8 @@ def seed_ecommerce_category_daily_revenue(conn: duckdb.DuckDBPyConnection):
 def seed_ecommerce_daily_kpi(conn: duckdb.DuckDBPyConnection):
     """orders 집계 + 모의 visitors 로 daily_kpi 생성.
 
-    visitors 는 orders 와 **독립적으로** 일정 유지 (~15000) — 시나리오 B
-    (재고 부족) 의 진짜 원인이 "방문자 감소" 가 아닌 "전환율 하락 (재고 없음)"
+    visitors 는 orders 와 **독립적으로** 일정 유지 (~15000) — 재고 부족
+    시나리오의 진짜 원인이 "방문자 감소" 가 아닌 "전환율 하락 (재고 없음)"
     임을 LLM 이 추론하게 하기 위함.
     """
     # orders 집계

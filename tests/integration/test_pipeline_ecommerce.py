@@ -323,7 +323,7 @@ class TestAllAgentsInvoked:
 
 
 class TestScenarioAnswerMapping:
-    """PRD §6 정답 키워드 셋 — 시나리오 B/C 의 인과 체인 마지막 노드 검증.
+    """PRD §6 정답 키워드 셋 — 재고 부족 시나리오의 인과 체인 마지막 노드 검증.
 
     실제 LLM 출력의 정답 도출은 manual eval 영역. 본 테스트는 mock 출력 기준
     매핑이 PipelineReport 에 보존되는지만 검증.

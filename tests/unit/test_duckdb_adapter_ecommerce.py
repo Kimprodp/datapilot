@@ -5,7 +5,7 @@
   payment_success_rate) 반환
 - get_available_dimensions: customers 테이블의 세그먼트 컬럼
 - get_metric_by_segments: gmv / orders 분해
-- 시나리오 B/C 검증 SQL 가능 (orders ↓ from D-7, gmv ↓ from D-3)
+- 재고 부족 시나리오 검증 SQL 가능 (orders ↓ from D-7)
 """
 
 from __future__ import annotations
@@ -82,13 +82,13 @@ class TestGetDailyKpiEcommerce:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 2. 시나리오 B/C 신호 검증
+# 2. 재고 부족 시나리오 신호 검증
 # ════════════════════════════════════════════════════════════════════
 
 
 class TestScenarioSignals:
-    def test_scenario_b_orders_drop_from_d_minus_7(self, ecommerce_adapter):
-        """시나리오 B: D-7 (2026-03-24) 부터 orders 약 12.5% 감소."""
+    def test_inventory_shortage_orders_drop_from_d_minus_7(self, ecommerce_adapter):
+        """재고 부족 시나리오: D-7 (2026-03-24) 부터 orders 약 12.5% 감소."""
         result = ecommerce_adapter.get_daily_kpi(
             ECOMMERCE_ENTITY_ID, PERIOD_LAST10,
         )
@@ -109,7 +109,7 @@ class TestScenarioSignals:
         drop_ratio = (avg_before - avg_after) / avg_before
         # 약 12.5% 감소 (kitchen 카테고리 50% ↓ → 전체 1/4 의 50%)
         assert 0.08 < drop_ratio < 0.20, (
-            f"시나리오 B 신호 강도 이상: D-7 전후 orders 변화율 {drop_ratio:.1%}"
+            f"재고 부족 시나리오 신호 강도 이상: D-7 전후 orders 변화율 {drop_ratio:.1%}"
         )
 
 
