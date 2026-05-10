@@ -851,7 +851,9 @@ def _render_segment_card(analysis: AnomalyAnalysis) -> None:
 def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
     """카드 3: 가설과 검증 (③+④).
 
-    SQL 트레이싱 동적 실행을 위해 카드당 ``make_repository`` conn 1 회 open.
+    ④ DataValidator 가 batch validation 으로 anomaly 의 모든 가설을 한 번에
+    검증 (모든 ValidationResult.queries_run 이 동일). 따라서 SQL 트레이싱
+    expander 는 카드 상단에 한 번만 노출.
     """
     with st.container(border=True):
         st.markdown(_card_header("가설과 검증", "③ 가설 생성 + ④ 데이터 검증"), unsafe_allow_html=True)
@@ -862,6 +864,14 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
         # active_domain 우선 — page_complete 에서 selectbox 사라져도 도메인 식별 유지.
         domain = st.session_state.get("active_domain") or st.session_state.get("domain", "game")
         with make_repository(domain) as repo:
+            # batch validation — 모든 가설이 동일한 queries_run 보유.
+            # 첫 번째로 SQL 가진 가설의 묶음을 카드 상단에 한 번만 노출.
+            trace_vr = next(
+                (v for v in sorted_results if v.queries_run),
+                None,
+            )
+            if trace_vr is not None:
+                _render_validation_sql_trace(trace_vr, repo)
             for vi, vr in enumerate(sorted_results):
                 vr_label, bg, fg = _STATUS_BADGE.get(vr.status, ("?", "#eee", "#333"))
                 badge = _badge_html(vr_label, bg, fg)
@@ -870,8 +880,10 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
                 # 번호 리스트(1. 2. 3.) 패턴을 개행 처리
                 ev_text = re.sub(r"(\d+)\.\s", r"<br>\1. ", ev_raw).lstrip("<br>")
                 is_last = vi == len(sorted_results) - 1
+                border = "" if is_last else "border-bottom:1px solid #f0f0f0;"
                 st.markdown(
-                    f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0 4px 0;'>"
+                    f"<div style='display:flex;align-items:flex-start;gap:10px;padding:10px 0;"
+                    f"{border}'>"
                     f"<div style='flex-shrink:0;margin-top:2px;'>{badge}</div>"
                     f"<div>"
                     f"<div style='font-size:14px;font-weight:500;'>{vr.hypothesis}</div>"
@@ -879,12 +891,6 @@ def _render_hypothesis_card(analysis: AnomalyAnalysis) -> None:
                     f"</div></div>",
                     unsafe_allow_html=True,
                 )
-                _render_validation_sql_trace(vr, repo)
-                if not is_last:
-                    st.markdown(
-                        "<div style='border-bottom:1px solid #f0f0f0;margin:6px 0;'></div>",
-                        unsafe_allow_html=True,
-                    )
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
 
