@@ -343,6 +343,26 @@ class TestExecuteSqlSecurity:
         # SELECT 매칭 실패 (UPDATE/DROP) → SELECT only 에러
         assert result["error"] == "SELECT 쿼리만 허용됩니다"
 
+    def test_allows_cte_with_starting_query(self, validator):
+        """``WITH ... SELECT ...`` (CTE) 는 표준 SELECT 의 한 형태 → 허용."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator,
+            "WITH recent AS (SELECT * FROM payments LIMIT 5) "
+            "SELECT * FROM recent",
+        )
+        self._assert_select_only_passed(result)
+
+    def test_allows_cte_with_leading_comment(self, validator):
+        """주석 + CTE 조합도 통과."""
+        self._set_allowed_tables(validator, frozenset({"payments"}))
+        result = self._invoke_tool(
+            validator,
+            "-- 가설 1: CTE 로 임시 결과 만들기\n"
+            "WITH x AS (SELECT * FROM payments LIMIT 1) SELECT * FROM x",
+        )
+        self._assert_select_only_passed(result)
+
     # ── 보안 레이어 2: 위험 키워드 블랙리스트 ──────────────────
 
     def test_blocks_drop_keyword_in_query(self, validator):

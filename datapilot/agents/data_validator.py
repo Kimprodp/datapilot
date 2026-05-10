@@ -309,11 +309,12 @@ class DataValidator:
             결과는 JSON 문자열로 반환된다.
             SELECT가 아니거나 허용되지 않은 테이블 접근 시 에러를 반환한다.
             """
-            # 1) SELECT only — leading 주석/공백 떨어낸 후 SELECT 매칭.
-            #    LLM 이 가독성 위해 `-- 가설 N: ...` 주석을 앞에 달아도 통과해야 함
-            #    (그렇지 않으면 매번 라운드 1~3 낭비됨).
+            # 1) SELECT only — leading 주석/공백 떨어낸 후 SELECT 또는 WITH 매칭.
+            #    LLM 이 가독성 위해 `-- 가설 N: ...` 주석을 앞에 달아도 통과해야 함.
+            #    CTE (`WITH ... SELECT ...`) 도 표준 SELECT 의 한 형태로 허용.
+            #    DML/DDL (UPDATE/DROP 등) 은 다음 단계 _DANGEROUS_PATTERN 이 별도 차단.
             stripped = _strip_leading_noise(query)
-            if not re.match(r"^SELECT\s", stripped, re.IGNORECASE):
+            if not re.match(r"^(SELECT|WITH)\s", stripped, re.IGNORECASE):
                 return json.dumps(
                     {"error": "SELECT 쿼리만 허용됩니다"},
                     ensure_ascii=False,
